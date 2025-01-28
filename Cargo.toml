@@ -6,3 +6,5 @@ edition = "2021"
 [dependencies]
 actix-rt = "2.10.0"
 actix-web = "4.9.0"
+anyhow = "1.0.95"
+mongodb = "3.2.0"
