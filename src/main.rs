@@ -1,31 +1,24 @@
-use std::sync::{Arc, Mutex};
+use api::user::config;
+use mongodb::MongoDatabase;
 
-use ::mongodb::Client;
-use actix_web::{get, web, App, HttpResponse, HttpServer, Responder};
-use mongodb::create_mongo_client;
+use actix_web::{web, App, HttpServer};
 
+mod api;
+mod models;
 mod mongodb;
-
-#[get("/test")]
-async fn test() -> impl Responder {
-    HttpResponse::Ok().body("Hello world!")
-}
-
-pub struct AppState {
-    mongodb_client: Arc<Mutex<Client>>,
-}
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    let mongodb_client = create_mongo_client()
+    let mongo_database = MongoDatabase::init()
         .await
         .expect("Failed to initialize MongoDB client");
-    let app_state = web::Data::new(AppState {
-        mongodb_client: Arc::new(Mutex::new(mongodb_client)),
-    });
 
-    HttpServer::new(move || App::new().service(test).app_data(app_state.clone()))
-        .bind("127.0.0.1:3030")?
-        .run()
-        .await
+    HttpServer::new(move || {
+        App::new()
+            .app_data(mongo_database.to_owned())
+            .service(web::scope("/user").configure(config))
+    })
+    .bind("127.0.0.1:3030")?
+    .run()
+    .await
 }
