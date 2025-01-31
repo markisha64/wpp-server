@@ -3,7 +3,7 @@ use chrono::{Duration, Utc};
 use actix_web::{error, web, Responder};
 use anyhow::Context;
 use bcrypt::{hash, verify};
-use mongodb::bson::doc;
+use mongodb::bson::{doc, oid::ObjectId};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -25,8 +25,26 @@ struct AuthResponse {
 }
 
 #[derive(Serialize)]
+struct UserResponse {
+    #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
+    pub id: Option<ObjectId>,
+    pub email: String,
+    pub display_name: String,
+}
+
+impl From<User> for UserResponse {
+    fn from(value: User) -> Self {
+        UserResponse {
+            id: value.id,
+            email: value.email,
+            display_name: value.display_name,
+        }
+    }
+}
+
+#[derive(Serialize)]
 struct Claims {
-    user: User,
+    user: UserResponse,
     exp: usize,
 }
 
@@ -72,7 +90,7 @@ async fn register(
         .map_err(|err| error::ErrorInternalServerError(err))?;
 
     let claims = Claims {
-        user: user_data,
+        user: user_data.into(),
         exp: (Utc::now() + Duration::days(1)).timestamp() as usize,
     };
 
@@ -117,7 +135,7 @@ async fn login(
     }
 
     let claims = Claims {
-        user,
+        user: user.into(),
         exp: (Utc::now() + Duration::days(1)).timestamp() as usize,
     };
 
