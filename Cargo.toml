@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-actix-web = { features = ["macros"], default-features = false, version = "4.9.0" }
+actix-web = { features = ["macros", "compress-gzip", "compress-brotli", "compress-zstd"], default-features = false, version = "4.9.0" }
 anyhow = { default-features = false, version = "1.0.95" }
 bcrypt = { features = ["std"], default-features = false, version = "0.17.0" }
 chrono = { default-features = false, version = "0.4.39" }
