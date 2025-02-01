@@ -1,4 +1,4 @@
-use api::user::{config, Claims};
+use api::user::Claims;
 use dotenv::dotenv;
 use jwt::{JwtAuth, JwtSignService};
 use mongodb::MongoDatabase;
@@ -9,11 +9,6 @@ mod api;
 mod jwt;
 mod models;
 mod mongodb;
-
-async fn jwt_r(claims: web::ReqData<Claims>) -> &'static str {
-    dbg!(claims);
-    "testing"
-}
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -31,11 +26,11 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .app_data(mongo_database.to_owned())
             .app_data(jwt_service.to_owned())
-            .service(web::scope("/user").configure(config))
+            .service(web::scope("/user").configure(api::user::config))
             .service(
-                web::scope("/test")
+                web::scope("/chat")
                     .wrap(jwt_auth.to_owned())
-                    .route("/jwt", web::get().to(jwt_r)),
+                    .configure(api::chat::config),
             )
     })
     .bind("127.0.0.1:3030")?

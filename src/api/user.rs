@@ -3,12 +3,12 @@ use chrono::{Duration, Utc};
 use actix_web::{error, web, Responder};
 use anyhow::Context;
 use bcrypt::{hash, verify};
-use mongodb::bson::{doc, oid::ObjectId};
+use mongodb::bson::doc;
 use serde::{Deserialize, Serialize};
 
 use crate::{
     jwt::JwtSignService,
-    models::{self, user::User},
+    models::{self, user::UserSafe},
     mongodb::MongoDatabase,
 };
 
@@ -25,26 +25,8 @@ struct AuthResponse {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-struct UserResponse {
-    #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
-    pub id: Option<ObjectId>,
-    pub email: String,
-    pub display_name: String,
-}
-
-impl From<User> for UserResponse {
-    fn from(value: User) -> Self {
-        UserResponse {
-            id: value.id,
-            email: value.email,
-            display_name: value.display_name,
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Claims {
-    user: UserResponse,
+    pub user: UserSafe,
     exp: usize,
 }
 
