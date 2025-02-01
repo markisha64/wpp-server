@@ -1,6 +1,6 @@
+use std::env;
 use std::marker::PhantomData;
 use std::sync::Arc;
-use std::{env, rc::Rc};
 
 use futures_util::future::LocalBoxFuture;
 use jsonwebtoken::{decode, DecodingKey, Validation};
@@ -92,8 +92,6 @@ where
     forward_ready!(service);
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
-        println!("Hi from start. You requested: {}", req.path());
-
         let token = match extract_token(&req) {
             Some(token) => token,
             None => {
@@ -114,8 +112,6 @@ where
 
         Box::pin(async move {
             let res = fut.await?;
-
-            println!("Hi from response");
 
             Ok(res)
         })
