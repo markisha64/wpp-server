@@ -23,6 +23,7 @@ async fn create(
         .insert_one(Chat {
             id: None,
             name: request.name.clone(),
+            creator: user.user.id,
             user_ids: vec![user.user.id],
         })
         .await
