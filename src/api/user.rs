@@ -7,7 +7,7 @@ use mongodb::bson::{doc, oid::ObjectId};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    jwt::JwtService,
+    jwt::JwtSignService,
     models::{self, user::User},
     mongodb::MongoDatabase,
 };
@@ -24,7 +24,7 @@ struct AuthResponse {
     token: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 struct UserResponse {
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     pub id: Option<ObjectId>,
@@ -42,15 +42,15 @@ impl From<User> for UserResponse {
     }
 }
 
-#[derive(Serialize)]
-struct Claims {
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Claims {
     user: UserResponse,
     exp: usize,
 }
 
 async fn register(
     db: web::Data<MongoDatabase>,
-    jwt: web::Data<JwtService>,
+    jwt: web::Data<JwtSignService>,
     request: web::Json<RegisterRequest>,
 ) -> actix_web::Result<impl Responder> {
     let collection = db.database.collection::<models::user::User>("users");
@@ -109,7 +109,7 @@ struct LoginRequest {
 
 async fn login(
     db: web::Data<MongoDatabase>,
-    jwt: web::Data<JwtService>,
+    jwt: web::Data<JwtSignService>,
     request: web::Json<LoginRequest>,
 ) -> actix_web::Result<impl Responder> {
     let collection = db.database.collection::<models::user::User>("users");

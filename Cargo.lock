@@ -2482,6 +2482,7 @@ dependencies = [
  "bcrypt",
  "chrono",
  "dotenv",
+ "futures-util",
  "jsonwebtoken",
  "mongodb",
  "serde",
