@@ -32,6 +32,11 @@ async fn main() -> std::io::Result<()> {
                     .wrap(jwt_auth.to_owned())
                     .configure(api::chat::config),
             )
+            .service(
+                web::scope("/message")
+                    .wrap(jwt_auth.to_owned())
+                    .configure(api::message::config),
+            )
     })
     .bind("127.0.0.1:3030")?
     .run()
