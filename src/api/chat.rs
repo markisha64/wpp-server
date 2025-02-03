@@ -25,6 +25,8 @@ async fn create(
             name: request.name.clone(),
             creator: user.user.id,
             user_ids: vec![user.user.id],
+            first_message_ts: None,
+            last_message_ts: None,
         })
         .await
         .map_err(|err| error::ErrorInternalServerError(err))?;

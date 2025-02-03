@@ -1,4 +1,4 @@
-use mongodb::bson::oid::ObjectId;
+use mongodb::bson::{oid::ObjectId, DateTime};
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -8,4 +8,6 @@ pub struct Chat {
     pub creator: ObjectId,
     pub name: String,
     pub user_ids: Vec<ObjectId>,
+    pub first_message_ts: Option<DateTime>,
+    pub last_message_ts: Option<DateTime>,
 }
