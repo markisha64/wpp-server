@@ -22,7 +22,7 @@ async fn create(
     request: web::Json<CreateRequest>,
 ) -> actix_web::Result<impl Responder> {
     let chat_collection = db.database.collection::<Chat>("chats");
-    let message_collection = db.database.collection::<ChatMessage>("messages");
+    let message_collection = db.database.collection::<ChatMessage>("chat_messages");
 
     let chat = chat_collection
         .find_one(doc! {
