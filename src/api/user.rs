@@ -52,27 +52,22 @@ async fn register(
         .await?
         .map_err(|err| error::ErrorInternalServerError(err))?;
 
-    let user = collection
-        .insert_one(models::user::User {
-            id: None,
-            email: request.email.clone(),
-            password_hash: hash.clone(),
-            display_name: request.display_name.clone(),
-        })
+    let mut user = models::user::User {
+        id: None,
+        email: request.email.clone(),
+        password_hash: hash.clone(),
+        display_name: request.display_name.clone(),
+    };
+
+    let inserted = collection
+        .insert_one(&user)
         .await
         .map_err(|err| error::ErrorInternalServerError(err))?;
 
-    let user_data = collection
-        .find_one(doc! {
-            "_id": user.inserted_id
-        })
-        .await
-        .map_err(|err| error::ErrorInternalServerError(err))?
-        .context("failed to find created user")
-        .map_err(|err| error::ErrorInternalServerError(err))?;
+    user.id = inserted.inserted_id.as_object_id();
 
     let claims = Claims {
-        user: user_data.into(),
+        user: user.into(),
         exp: (Utc::now() + Duration::days(1)).timestamp() as usize,
     };
 

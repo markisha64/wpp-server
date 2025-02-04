@@ -19,26 +19,21 @@ async fn create(
 ) -> actix_web::Result<impl Responder> {
     let collection = db.database.collection::<Chat>("chats");
 
+    let mut chat = Chat {
+        id: None,
+        name: request.name.clone(),
+        creator: user.user.id,
+        user_ids: vec![user.user.id],
+        first_message_ts: None,
+        last_message_ts: None,
+    };
+
     let inserted = collection
-        .insert_one(Chat {
-            id: None,
-            name: request.name.clone(),
-            creator: user.user.id,
-            user_ids: vec![user.user.id],
-            first_message_ts: None,
-            last_message_ts: None,
-        })
+        .insert_one(&chat)
         .await
         .map_err(|err| error::ErrorInternalServerError(err))?;
 
-    let chat = collection
-        .find_one(doc! {
-            "_id": inserted.inserted_id
-        })
-        .await
-        .map_err(|err| error::ErrorInternalServerError(err))?
-        .context("failed to find created chat")
-        .map_err(|err| error::ErrorInternalServerError(err))?;
+    chat.id = inserted.inserted_id.as_object_id();
 
     Ok(web::Json(chat))
 }
