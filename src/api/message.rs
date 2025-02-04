@@ -37,11 +37,13 @@ async fn create(
         return Err(error::ErrorNotFound("chat not found"));
     }
 
+    let ts = DateTime::now();
+
     let mut message = ChatMessage {
         id: None,
         chat_id: request.chat_id,
         creator: Some(user.user.id),
-        created_at: DateTime::now(),
+        created_at: ts,
         deleted_at: None,
         content: request.content.clone(),
     };
@@ -52,6 +54,20 @@ async fn create(
         .map_err(|err| error::ErrorInternalServerError(err))?;
 
     message.id = message_id.inserted_id.as_object_id();
+
+    chat_collection
+        .update_one(
+            doc! {
+                "_id": &request.chat_id
+            },
+            doc! {
+                "$set": {
+                    "last_message_ts": ts
+                }
+            },
+        )
+        .await
+        .map_err(|err| error::ErrorInternalServerError(err))?;
 
     Ok(web::Json(message))
 }

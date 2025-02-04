@@ -1,9 +1,16 @@
+use std::future::IntoFuture;
+
 use actix_web::{error, web, Responder};
 use anyhow::Context;
-use mongodb::bson::{doc, oid::ObjectId};
+use mongodb::bson::{doc, oid::ObjectId, DateTime};
 use serde::{Deserialize, Serialize};
 
-use crate::{models::chat::Chat, mongodb::MongoDatabase};
+use futures_util::{try_join, TryFutureExt};
+
+use crate::{
+    models::{chat::Chat, chat_message::ChatMessage},
+    mongodb::MongoDatabase,
+};
 
 use super::user::Claims;
 
@@ -18,6 +25,7 @@ async fn create(
     request: web::Json<CreateRequest>,
 ) -> actix_web::Result<impl Responder> {
     let collection = db.database.collection::<Chat>("chats");
+    let message_collection = db.database.collection::<ChatMessage>("chat_messages");
 
     let mut chat = Chat {
         id: None,
@@ -33,7 +41,44 @@ async fn create(
         .await
         .map_err(|err| error::ErrorInternalServerError(err))?;
 
-    chat.id = inserted.inserted_id.as_object_id();
+    let chat_id = inserted
+        .inserted_id
+        .as_object_id()
+        .context("missing inserted chat id")
+        .map_err(|err| error::ErrorInternalServerError(err))?;
+
+    chat.id = Some(chat_id);
+
+    let ts = DateTime::now();
+
+    let msg_future = message_collection
+        .insert_one(ChatMessage {
+            id: None,
+            chat_id,
+            creator: None,
+            created_at: ts,
+            deleted_at: None,
+            content: String::from("Chat created"),
+        })
+        .into_future()
+        .map_err(|err| error::ErrorInternalServerError(err));
+
+    let chat_future = collection
+        .update_one(
+            doc! {
+                "_id": chat_id
+            },
+            doc! {
+                "$set": {
+                    "first_message_ts": ts,
+                    "last_message_ts": ts
+                }
+            },
+        )
+        .into_future()
+        .map_err(|err| error::ErrorInternalServerError(err));
+
+    try_join!(msg_future, chat_future)?;
 
     Ok(web::Json(chat))
 }
