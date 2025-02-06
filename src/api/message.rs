@@ -1,5 +1,8 @@
+use std::future::IntoFuture;
+
 use actix_web::{error, web, Responder};
 use anyhow::Context;
+use futures_util::{try_join, TryFutureExt};
 use mongodb::bson::{doc, oid::ObjectId, DateTime};
 use serde::Deserialize;
 
@@ -52,14 +55,12 @@ async fn create(
         content: request.content.clone(),
     };
 
-    let message_id = message_collection
+    let message_future = message_collection
         .insert_one(&message)
-        .await
-        .map_err(|err| error::ErrorInternalServerError(err))?;
+        .into_future()
+        .map_err(|err| error::ErrorInternalServerError(err));
 
-    message.id = message_id.inserted_id.as_object_id();
-
-    chat_collection
+    let chat_future = chat_collection
         .update_one(
             doc! {
                 "_id": &request.chat_id
@@ -70,8 +71,12 @@ async fn create(
                 }
             },
         )
-        .await
-        .map_err(|err| error::ErrorInternalServerError(err))?;
+        .into_future()
+        .map_err(|err| error::ErrorInternalServerError(err));
+
+    let (message_id, _) = try_join!(message_future, chat_future)?;
+
+    message.id = message_id.inserted_id.as_object_id();
 
     let notif_payload = WebsocketMessage::NewMessage(message.clone().into());
 
