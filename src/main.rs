@@ -1,4 +1,4 @@
-use api::user::Claims;
+use api::{user::Claims, websocket::WebsocketState};
 use dotenv::dotenv;
 use jwt::{JwtAuth, JwtSignService};
 use mongodb::MongoDatabase;
@@ -22,10 +22,13 @@ async fn main() -> std::io::Result<()> {
 
     let jwt_auth = JwtAuth::<Claims>::init().expect("failed to auth init");
 
+    let websocket_state = WebsocketState::init();
+
     HttpServer::new(move || {
         App::new()
             .app_data(mongo_database.to_owned())
             .app_data(jwt_service.to_owned())
+            .app_data(websocket_state.to_owned())
             .service(web::scope("/user").configure(api::user::config))
             .service(
                 web::scope("/chat")
@@ -36,6 +39,11 @@ async fn main() -> std::io::Result<()> {
                 web::scope("/message")
                     .wrap(jwt_auth.to_owned())
                     .configure(api::message::config),
+            )
+            .service(
+                web::scope("/ws")
+                    .wrap(jwt_auth.to_owned())
+                    .configure(api::websocket::config),
             )
     })
     .bind("127.0.0.1:3030")?
