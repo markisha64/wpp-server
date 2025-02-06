@@ -76,7 +76,9 @@ async fn create(
     let notif_payload = WebsocketMessage::NewMessage(message.clone().into());
 
     actix_web::rt::spawn(async move {
-        if let Err(err) = ws_state.send_to_users(&chat.user_ids, &notif_payload).await {}
+        if let Err(err) = ws_state.send_to_users(&chat.user_ids, &notif_payload).await {
+            eprintln!("{}", err);
+        }
     });
 
     Ok(web::Json(message))
