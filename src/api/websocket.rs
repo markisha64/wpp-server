@@ -1,4 +1,4 @@
-use std::{collections::HashMap, hash::Hash, hash::Hasher, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use actix_web::{web, HttpRequest, Responder};
 use actix_ws::{self, AggregatedMessage, Session};
@@ -28,22 +28,7 @@ impl WebsocketState {
 
 #[derive(Clone, Debug)]
 pub struct WsSession {
-    pub id: Uuid,
     pub session: Arc<Mutex<Session>>,
-}
-
-impl PartialEq for WsSession {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for WsSession {}
-
-impl Hash for WsSession {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -67,7 +52,6 @@ async fn websocket(
     let session_uuid = Uuid::new_v4();
 
     let ws_session = WsSession {
-        id: session_uuid,
         session: session.clone(),
     };
 
