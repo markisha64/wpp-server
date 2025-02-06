@@ -90,7 +90,7 @@ async fn create(
             let mut to_remove = Vec::new();
 
             for (id, connection) in set.iter() {
-                let mut session = connection.session.lock().await;
+                let mut session = connection.lock().await;
 
                 if session.text(notif).await.is_err() {
                     to_remove.push(*id);

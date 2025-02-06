@@ -11,7 +11,7 @@ use crate::models::chat_message::ChatMessageSafe;
 use super::user::Claims;
 
 pub struct WebsocketState {
-    pub connections: Mutex<HashMap<String, HashMap<Uuid, WsSession>>>,
+    pub connections: Mutex<HashMap<String, HashMap<Uuid, Arc<Mutex<Session>>>>>,
 }
 
 impl WebsocketState {
@@ -24,11 +24,6 @@ impl WebsocketState {
     pub fn init() -> web::Data<Self> {
         web::Data::new(Self::new())
     }
-}
-
-#[derive(Clone, Debug)]
-pub struct WsSession {
-    pub session: Arc<Mutex<Session>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -51,13 +46,9 @@ async fn websocket(
 
     let session_uuid = Uuid::new_v4();
 
-    let ws_session = WsSession {
-        session: session.clone(),
-    };
-
     mg.entry(user.user.id.to_string())
         .or_insert_with(HashMap::new)
-        .insert(session_uuid, ws_session.clone());
+        .insert(session_uuid, session.clone());
 
     // need to drop it so it doesn't get moved
     drop(mg);
