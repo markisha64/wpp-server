@@ -3,6 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use actix_web::{web, HttpRequest, Responder};
 use actix_ws::{self, AggregatedMessage, Session};
 use futures_util::{lock::Mutex, StreamExt as _};
+use mongodb::bson::oid::ObjectId;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -23,6 +24,37 @@ impl WebsocketState {
 
     pub fn init() -> web::Data<Self> {
         web::Data::new(Self::new())
+    }
+
+    pub async fn send_to_users(
+        &self,
+        user_ids: &Vec<ObjectId>,
+        message: &WebsocketMessage,
+    ) -> anyhow::Result<()> {
+        let notif = serde_json::to_string(message)?;
+        let notif_str = notif.as_str();
+
+        for user_id in user_ids {
+            let mut mg = self.connections.lock().await;
+
+            let set = mg.entry(user_id.to_string()).or_insert_with(HashMap::new);
+
+            let mut to_remove = Vec::new();
+
+            for (id, connection) in set.iter() {
+                let mut session = connection.lock().await;
+
+                if session.text(notif_str).await.is_err() {
+                    to_remove.push(*id);
+                }
+            }
+
+            for id in to_remove.iter() {
+                set.remove(id);
+            }
+        }
+
+        Ok(())
     }
 }
 

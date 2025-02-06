@@ -76,31 +76,9 @@ async fn create(
         .map_err(|err| error::ErrorInternalServerError(err))?;
 
     let notif_payload = WebsocketMessage::NewMessage(message.clone().into());
-    let notif_payload_text = serde_json::to_string(&notif_payload)
-        .map_err(|err| error::ErrorInternalServerError(err))?;
 
     actix_web::rt::spawn(async move {
-        let notif = notif_payload_text.as_str();
-
-        for user_id in chat.user_ids {
-            let mut mg = ws_state.connections.lock().await;
-
-            let set = mg.entry(user_id.to_string()).or_insert_with(HashMap::new);
-
-            let mut to_remove = Vec::new();
-
-            for (id, connection) in set.iter() {
-                let mut session = connection.lock().await;
-
-                if session.text(notif).await.is_err() {
-                    to_remove.push(*id);
-                }
-            }
-
-            for id in to_remove.iter() {
-                set.remove(id);
-            }
-        }
+        if let Err(err) = ws_state.send_to_users(&chat.user_ids, &notif_payload).await {}
     });
 
     Ok(web::Json(message))
