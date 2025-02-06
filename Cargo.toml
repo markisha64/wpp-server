@@ -15,6 +15,7 @@ futures-util = "0.3.31"
 jsonwebtoken = { default-features = false, version = "9.3.0" }
 mongodb = "3.2.0"
 serde = { version = "1.0.217", default-features = false }
+serde_json = "1.0.138"
 uuid = "1.13.1"
 
 [build]

@@ -1,19 +1,17 @@
-use std::{
-    collections::{HashMap, HashSet},
-    hash::Hash,
-    hash::Hasher,
-    sync::Arc,
-};
+use std::{collections::HashMap, hash::Hash, hash::Hasher, sync::Arc};
 
-use actix_web::{error, web, HttpRequest, Responder};
+use actix_web::{web, HttpRequest, Responder};
 use actix_ws::{self, AggregatedMessage, Session};
 use futures_util::{lock::Mutex, StreamExt as _};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+use crate::models::chat_message::ChatMessageSafe;
 
 use super::user::Claims;
 
 pub struct WebsocketState {
-    connections: Mutex<HashMap<String, HashSet<WsSession>>>,
+    pub connections: Mutex<HashMap<String, HashMap<Uuid, WsSession>>>,
 }
 
 impl WebsocketState {
@@ -29,9 +27,9 @@ impl WebsocketState {
 }
 
 #[derive(Clone, Debug)]
-struct WsSession {
-    id: Uuid,
-    session: Arc<Mutex<Session>>,
+pub struct WsSession {
+    pub id: Uuid,
+    pub session: Arc<Mutex<Session>>,
 }
 
 impl PartialEq for WsSession {
@@ -46,6 +44,12 @@ impl Hash for WsSession {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.id.hash(state);
     }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "t", content = "c")]
+pub enum WebsocketMessage {
+    NewMessage(ChatMessageSafe),
 }
 
 async fn websocket(
@@ -68,8 +72,8 @@ async fn websocket(
     };
 
     mg.entry(user.user.id.to_string())
-        .or_insert_with(HashSet::new)
-        .insert(ws_session.clone());
+        .or_insert_with(HashMap::new)
+        .insert(session_uuid, ws_session.clone());
 
     // need to drop it so it doesn't get moved
     drop(mg);
@@ -88,8 +92,8 @@ async fn websocket(
                         let mut mg = ws_state.connections.lock().await;
 
                         mg.entry(user.user.id.to_string())
-                            .or_insert(HashSet::new())
-                            .remove(&ws_session);
+                            .or_insert_with(HashMap::new)
+                            .remove(&session_uuid);
 
                         return;
                     }
@@ -98,8 +102,8 @@ async fn websocket(
                     let mut mg = ws_state.connections.lock().await;
 
                     mg.entry(user.user.id.to_string())
-                        .or_insert(HashSet::new())
-                        .remove(&ws_session);
+                        .or_insert_with(HashMap::new)
+                        .remove(&session_uuid);
 
                     break;
                 }
