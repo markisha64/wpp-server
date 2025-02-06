@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use actix_web::{error, web, Responder};
 use anyhow::Context;
 use mongodb::bson::{doc, oid::ObjectId, DateTime};
