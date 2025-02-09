@@ -1,13 +1,16 @@
 use std::future::IntoFuture;
 
-use actix_web::{error, web, Responder};
-use anyhow::Context;
-use futures_util::{try_join, TryFutureExt};
+use actix_web::web;
+use anyhow::{anyhow, Context};
+use futures_util::try_join;
 use mongodb::bson::{doc, oid::ObjectId, DateTime};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
-    models::{chat::Chat, chat_message::ChatMessage},
+    models::{
+        chat::Chat,
+        chat_message::{ChatMessage, ChatMessageSafe},
+    },
     mongodb::MongoDatabase,
 };
 
@@ -16,18 +19,18 @@ use super::{
     websocket::{WebsocketServerMessage, WebsocketSeverHandle},
 };
 
-#[derive(Deserialize)]
-struct CreateRequest {
+#[derive(Serialize, Deserialize)]
+pub struct CreateRequest {
     chat_id: ObjectId,
     content: String,
 }
 
-async fn create(
+pub async fn create(
     db: web::Data<MongoDatabase>,
-    user: web::ReqData<Claims>,
+    user: &web::ReqData<Claims>,
     ws_server: web::Data<WebsocketSeverHandle>,
-    request: web::Json<CreateRequest>,
-) -> actix_web::Result<impl Responder> {
+    request: CreateRequest,
+) -> anyhow::Result<ChatMessageSafe> {
     let chat_collection = db.database.collection::<Chat>("chats");
     let message_collection = db.database.collection::<ChatMessage>("chat_messages");
 
@@ -35,15 +38,12 @@ async fn create(
         .find_one(doc! {
             "_id": &request.chat_id
         })
-        .await
-        .map_err(|err| error::ErrorInternalServerError(err))?
-        .context("chat not found")
-        .map_err(|err| error::ErrorNotFound(err))?;
+        .await?
+        .context("chat not found")?;
 
     if !chat.user_ids.contains(&user.user.id) {
-        return Err(error::ErrorNotFound("chat not found"));
+        return Err(anyhow!("chat not found"));
     }
-
     let ts = DateTime::now();
 
     let mut message = ChatMessage {
@@ -55,10 +55,7 @@ async fn create(
         content: request.content.clone(),
     };
 
-    let message_future = message_collection
-        .insert_one(&message)
-        .into_future()
-        .map_err(|err| error::ErrorInternalServerError(err));
+    let message_future = message_collection.insert_one(&message).into_future();
 
     let chat_future = chat_collection
         .update_one(
@@ -71,8 +68,7 @@ async fn create(
                 }
             },
         )
-        .into_future()
-        .map_err(|err| error::ErrorInternalServerError(err));
+        .into_future();
 
     let (message_id, _) = try_join!(message_future, chat_future)?;
 
@@ -86,9 +82,5 @@ async fn create(
             .await;
     });
 
-    Ok(web::Json(message))
-}
-
-pub fn config(cfg: &mut web::ServiceConfig) {
-    cfg.route("/", web::post().to(create));
+    Ok(message.into())
 }

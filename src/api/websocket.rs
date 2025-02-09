@@ -15,13 +15,20 @@ use mongodb::bson::oid::ObjectId;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::models::chat_message::ChatMessageSafe;
+use crate::{
+    models::{chat::Chat, chat_message::ChatMessageSafe},
+    mongodb::MongoDatabase,
+};
 use tokio::{
     sync::{mpsc, oneshot},
     time::interval,
 };
 
-use super::user::Claims;
+use super::{
+    chat::{self, JoinResponse},
+    message,
+    user::Claims,
+};
 
 type ConnId = Uuid;
 
@@ -29,6 +36,39 @@ type ConnId = Uuid;
 #[serde(tag = "t", content = "c")]
 pub enum WebsocketServerMessage {
     NewMessage(ChatMessageSafe),
+    RequestResponse {
+        id: Uuid,
+        data: Option<WebsocketServerResData>,
+        error: Option<String>,
+    },
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(tag = "t", content = "c")]
+pub enum WebsocketServerResData {
+    // chat routes
+    CreateChat(Chat),
+    JoinChat(JoinResponse),
+
+    // message routes
+    NewMessage(ChatMessageSafe),
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct WebsocketClientMessage {
+    id: Uuid,
+    data: WebsocketClientMessageData,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "t", content = "c")]
+pub enum WebsocketClientMessageData {
+    // chat routes
+    CreateChat(crate::api::chat::CreateRequest),
+    JoinChat(String),
+
+    // message routes
+    NewMessage(crate::api::message::CreateRequest),
 }
 
 enum Command {
@@ -54,18 +94,22 @@ pub struct WebsocketServer {
     connections: HashMap<String, HashMap<Uuid, mpsc::UnboundedSender<WebsocketServerMessage>>>,
 
     cmd_rx: mpsc::UnboundedReceiver<Command>,
+
+    #[allow(dead_code)]
+    db: web::Data<MongoDatabase>,
 }
 
 impl WebsocketServer {
-    pub fn new() -> (Self, WebsocketSeverHandle) {
+    pub fn new(db: web::Data<MongoDatabase>) -> (Self, WebsocketSeverHandle) {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
 
         (
             Self {
                 connections: HashMap::new(),
                 cmd_rx,
+                db: db.clone(),
             },
-            WebsocketSeverHandle { cmd_tx },
+            WebsocketSeverHandle { cmd_tx, db },
         )
     }
 
@@ -132,6 +176,8 @@ impl WebsocketServer {
 #[derive(Clone)]
 pub struct WebsocketSeverHandle {
     cmd_tx: mpsc::UnboundedSender<Command>,
+
+    db: web::Data<MongoDatabase>,
 }
 
 impl WebsocketSeverHandle {
@@ -187,6 +233,24 @@ impl WebsocketSeverHandle {
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
 
+fn to_request_response(
+    res: anyhow::Result<WebsocketServerResData>,
+    id: Uuid,
+) -> WebsocketServerMessage {
+    match res {
+        Ok(data) => WebsocketServerMessage::RequestResponse {
+            id,
+            error: None,
+            data: Some(data),
+        },
+        Err(err) => WebsocketServerMessage::RequestResponse {
+            id,
+            error: Some(format!("{}", err)),
+            data: None,
+        },
+    }
+}
+
 async fn websocket(
     req: HttpRequest,
     body: web::Payload,
@@ -196,6 +260,8 @@ async fn websocket(
     let (res, mut session, msg_stream) = actix_ws::handle(&req, body)?;
 
     actix_web::rt::spawn(async move {
+        let user = user.clone();
+
         let user_id = user.user.id;
 
         let mut last_heartbeat = Instant::now();
@@ -233,7 +299,59 @@ async fn websocket(
 
                     AggregatedMessage::Close(reason) => break reason,
 
-                    _ => {
+                    AggregatedMessage::Text(payload) => {
+                        last_heartbeat = Instant::now();
+
+                        if let Ok(request) = serde_json::from_str::<WebsocketClientMessage>(
+                            payload.to_string().as_str(),
+                        ) {
+                            match request.data {
+                                WebsocketClientMessageData::CreateChat(req_data) => {
+                                    let req_res =
+                                        chat::create(ws_server.db.clone(), &user, req_data)
+                                            .await
+                                            .map(|data| WebsocketServerResData::CreateChat(data));
+
+                                    let res = to_request_response(req_res, request.id);
+
+                                    if let Ok(string_payload) = serde_json::to_string(&res) {
+                                        session.text(string_payload).await.unwrap();
+                                    }
+                                }
+
+                                WebsocketClientMessageData::JoinChat(id) => {
+                                    let req_res = chat::join(ws_server.db.clone(), &user, id)
+                                        .await
+                                        .map(|data| WebsocketServerResData::JoinChat(data));
+
+                                    let res = to_request_response(req_res, request.id);
+
+                                    if let Ok(string_payload) = serde_json::to_string(&res) {
+                                        session.text(string_payload).await.unwrap();
+                                    }
+                                }
+
+                                WebsocketClientMessageData::NewMessage(req_data) => {
+                                    let req_res = message::create(
+                                        ws_server.db.clone(),
+                                        &user,
+                                        ws_server.clone(),
+                                        req_data,
+                                    )
+                                    .await
+                                    .map(|data| WebsocketServerResData::NewMessage(data));
+
+                                    let res = to_request_response(req_res, request.id);
+
+                                    if let Ok(string_payload) = serde_json::to_string(&res) {
+                                        session.text(string_payload).await.unwrap();
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    AggregatedMessage::Binary(_bytes) => {
                         last_heartbeat = Instant::now();
                     }
                 },
@@ -246,13 +364,11 @@ async fn websocket(
                 // ws stream end
                 Either::Left((Either::Left((None, _)), _)) => break None,
 
-                Either::Left((Either::Right((Some(ws_msg), _)), _)) => match ws_msg {
-                    WebsocketServerMessage::NewMessage(chat_message) => {
-                        if let Ok(notif) = serde_json::to_string(&chat_message) {
-                            let _ = session.text(notif).await;
-                        }
+                Either::Left((Either::Right((Some(ws_msg), _)), _)) => {
+                    if let Ok(notif) = serde_json::to_string(&ws_msg) {
+                        let _ = session.text(notif).await;
                     }
-                },
+                }
 
                 Either::Left((Either::Right((None, _)), _)) => unreachable!(
                     "all connection message senders were dropped; ws server may have panicked"

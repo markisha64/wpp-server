@@ -1,11 +1,11 @@
 use std::future::IntoFuture;
 
-use actix_web::{error, web, Responder};
+use actix_web::web;
 use anyhow::Context;
 use mongodb::bson::{doc, oid::ObjectId, DateTime};
 use serde::{Deserialize, Serialize};
 
-use futures_util::{try_join, TryFutureExt};
+use futures_util::try_join;
 
 use crate::{
     models::{chat::Chat, chat_message::ChatMessage},
@@ -14,16 +14,16 @@ use crate::{
 
 use super::user::Claims;
 
-#[derive(Deserialize)]
-struct CreateRequest {
-    name: String,
+#[derive(Serialize, Deserialize)]
+pub struct CreateRequest {
+    pub name: String,
 }
 
-async fn create(
+pub async fn create(
     db: web::Data<MongoDatabase>,
-    user: web::ReqData<Claims>,
-    request: web::Json<CreateRequest>,
-) -> actix_web::Result<impl Responder> {
+    user: &web::ReqData<Claims>,
+    request: CreateRequest,
+) -> anyhow::Result<Chat> {
     let collection = db.database.collection::<Chat>("chats");
     let message_collection = db.database.collection::<ChatMessage>("chat_messages");
 
@@ -36,16 +36,12 @@ async fn create(
         last_message_ts: None,
     };
 
-    let inserted = collection
-        .insert_one(&chat)
-        .await
-        .map_err(|err| error::ErrorInternalServerError(err))?;
+    let inserted = collection.insert_one(&chat).await?;
 
     let chat_id = inserted
         .inserted_id
         .as_object_id()
-        .context("missing inserted chat id")
-        .map_err(|err| error::ErrorInternalServerError(err))?;
+        .context("missing inserted chat id")?;
 
     chat.id = Some(chat_id);
 
@@ -60,8 +56,7 @@ async fn create(
             deleted_at: None,
             content: String::from("Chat created"),
         })
-        .into_future()
-        .map_err(|err| error::ErrorInternalServerError(err));
+        .into_future();
 
     let chat_future = collection
         .update_one(
@@ -75,38 +70,34 @@ async fn create(
                 }
             },
         )
-        .into_future()
-        .map_err(|err| error::ErrorInternalServerError(err));
+        .into_future();
 
     try_join!(msg_future, chat_future)?;
 
-    Ok(web::Json(chat))
+    Ok(chat)
 }
 
-#[derive(Serialize)]
-struct JoinResponse {}
+#[derive(Deserialize, Serialize, Clone)]
+pub struct JoinResponse {}
 
-async fn join(
+pub async fn join(
     db: web::Data<MongoDatabase>,
-    user: web::ReqData<Claims>,
-    id: web::Path<String>,
-) -> actix_web::Result<impl Responder> {
+    user: &web::ReqData<Claims>,
+    id: String,
+) -> anyhow::Result<JoinResponse> {
     let collection = db.database.collection::<Chat>("chats");
 
-    let chat_id =
-        ObjectId::parse_str(id.into_inner()).map_err(|err| error::ErrorBadRequest(err))?;
+    let chat_id = ObjectId::parse_str(id)?;
 
     let chat = collection
         .find_one(doc! {
             "_id": &chat_id
         })
-        .await
-        .map_err(|err| error::ErrorInternalServerError(err))?
-        .context("chat not found")
-        .map_err(|err| error::ErrorNotFound(err))?;
+        .await?
+        .context("chat not found")?;
 
     if chat.user_ids.contains(&user.user.id) {
-        return Ok(web::Json(JoinResponse {}));
+        return Ok(JoinResponse {});
     }
 
     db.database
@@ -119,13 +110,7 @@ async fn join(
               "$push": { "user_ids": &user.user.id }
             },
         )
-        .await
-        .map_err(|err| error::ErrorInternalServerError(err))?;
+        .await?;
 
-    Ok(web::Json(JoinResponse {}))
-}
-
-pub fn config(cfg: &mut web::ServiceConfig) {
-    cfg.route("/", web::post().to(create))
-        .route("/{id}", web::patch().to(join));
+    Ok(JoinResponse {})
 }

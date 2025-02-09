@@ -23,7 +23,7 @@ async fn main() -> std::io::Result<()> {
 
     let jwt_auth = JwtAuth::<Claims>::init().expect("failed to auth init");
 
-    let (ws_server, server_tx) = WebsocketServer::new();
+    let (ws_server, server_tx) = WebsocketServer::new(mongo_database.to_owned());
 
     let ws_fut = spawn(ws_server.run());
 
@@ -33,16 +33,6 @@ async fn main() -> std::io::Result<()> {
             .app_data(jwt_service.to_owned())
             .app_data(web::Data::new(server_tx.clone()))
             .service(web::scope("/user").configure(api::user::config))
-            .service(
-                web::scope("/chat")
-                    .wrap(jwt_auth.to_owned())
-                    .configure(api::chat::config),
-            )
-            .service(
-                web::scope("/message")
-                    .wrap(jwt_auth.to_owned())
-                    .configure(api::message::config),
-            )
             .service(
                 web::scope("/ws")
                     .wrap(jwt_auth.to_owned())
