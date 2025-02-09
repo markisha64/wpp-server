@@ -13,7 +13,7 @@ use crate::{
 
 use super::{
     user::Claims,
-    websocket::{WebsocketMessage, WebsocketState},
+    websocket::{WebsocketServerMessage, WebsocketSeverHandle},
 };
 
 #[derive(Deserialize)]
@@ -25,7 +25,7 @@ struct CreateRequest {
 async fn create(
     db: web::Data<MongoDatabase>,
     user: web::ReqData<Claims>,
-    ws_state: web::Data<WebsocketState>,
+    ws_server: web::Data<WebsocketSeverHandle>,
     request: web::Json<CreateRequest>,
 ) -> actix_web::Result<impl Responder> {
     let chat_collection = db.database.collection::<Chat>("chats");
@@ -78,12 +78,12 @@ async fn create(
 
     message.id = message_id.inserted_id.as_object_id();
 
-    let notif_payload = WebsocketMessage::NewMessage(message.clone().into());
+    let notif_payload = WebsocketServerMessage::NewMessage(message.clone().into());
 
     actix_web::rt::spawn(async move {
-        if let Err(err) = ws_state.send_to_users(&chat.user_ids, &notif_payload).await {
-            eprintln!("{}", err);
-        }
+        ws_server
+            .send_message_to_users(&chat.user_ids, notif_payload)
+            .await;
     });
 
     Ok(web::Json(message))

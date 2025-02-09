@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-actix = "0.13.5"
 actix-web = { features = ["macros", "compress-gzip", "compress-brotli", "compress-zstd"], default-features = false, version = "4.9.0" }
 actix-ws = "0.3.0"
 anyhow = { default-features = false, version = "1.0.95" }
@@ -16,6 +15,7 @@ jsonwebtoken = { default-features = false, version = "9.3.0" }
 mongodb = "3.2.0"
 serde = { version = "1.0.217", default-features = false }
 serde_json = "1.0.138"
+tokio = "1.43.0"
 uuid = "1.13.1"
 
 [build]

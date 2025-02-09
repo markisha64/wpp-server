@@ -12,7 +12,7 @@ pub struct ChatMessage {
     pub content: String,
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct ChatMessageSafe {
     #[serde(rename = "_id")]
     pub id: ObjectId,

@@ -1,9 +1,10 @@
-use api::{user::Claims, websocket::WebsocketState};
+use api::{user::Claims, websocket::WebsocketServer};
 use dotenv::dotenv;
 use jwt::{JwtAuth, JwtSignService};
 use mongodb::MongoDatabase;
 
 use actix_web::{web, App, HttpServer};
+use tokio::{task::spawn, try_join};
 
 mod api;
 mod jwt;
@@ -22,13 +23,15 @@ async fn main() -> std::io::Result<()> {
 
     let jwt_auth = JwtAuth::<Claims>::init().expect("failed to auth init");
 
-    let websocket_state = WebsocketState::init();
+    let (ws_server, server_tx) = WebsocketServer::new();
 
-    HttpServer::new(move || {
+    let ws_fut = spawn(ws_server.run());
+
+    let http_fut = HttpServer::new(move || {
         App::new()
             .app_data(mongo_database.to_owned())
             .app_data(jwt_service.to_owned())
-            .app_data(websocket_state.to_owned())
+            .app_data(web::Data::new(server_tx.clone()))
             .service(web::scope("/user").configure(api::user::config))
             .service(
                 web::scope("/chat")
@@ -47,6 +50,9 @@ async fn main() -> std::io::Result<()> {
             )
     })
     .bind("127.0.0.1:3030")?
-    .run()
-    .await
+    .run();
+
+    try_join!(http_fut, async move { ws_fut.await.unwrap() })?;
+
+    Ok(())
 }
