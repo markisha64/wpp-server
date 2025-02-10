@@ -379,17 +379,9 @@ async fn websocket(
                 // ws stream end
                 Either::Left((Either::Left((None, _)), _)) => break None,
 
-                #[cfg(not(feature = "binary_fmt"))]
                 Either::Left((Either::Right((Some(ws_msg), _)), _)) => {
                     if let Ok(notif) = serde_json::to_string(&ws_msg) {
                         let _ = session.text(notif).await;
-                    }
-                }
-
-                #[cfg(feature = "binary_fmt")]
-                Either::Left((Either::Right((Some(ws_msg), _)), _)) => {
-                    if let Ok(bytes) = bincode::serialize(&ws_msg) {
-                        let _ = session.binary(bytes).await;
                     }
                 }
 
