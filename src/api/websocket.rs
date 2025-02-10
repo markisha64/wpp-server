@@ -307,18 +307,14 @@ async fn websocket(
                         if let Ok(request) = serde_json::from_str::<WebsocketClientMessage>(
                             payload.to_string().as_str(),
                         ) {
-                            match request.data {
+                            let res = match request.data {
                                 WebsocketClientMessageData::CreateChat(req_data) => {
                                     let req_res =
                                         chat::create(ws_server.db.clone(), &user, req_data)
                                             .await
                                             .map(|data| WebsocketServerResData::CreateChat(data));
 
-                                    let res = to_request_response(req_res, request.id);
-
-                                    if let Ok(string_payload) = serde_json::to_string(&res) {
-                                        session.text(string_payload).await.unwrap();
-                                    }
+                                    to_request_response(req_res, request.id)
                                 }
 
                                 WebsocketClientMessageData::JoinChat(id) => {
@@ -326,11 +322,7 @@ async fn websocket(
                                         .await
                                         .map(|data| WebsocketServerResData::JoinChat(data));
 
-                                    let res = to_request_response(req_res, request.id);
-
-                                    if let Ok(string_payload) = serde_json::to_string(&res) {
-                                        session.text(string_payload).await.unwrap();
-                                    }
+                                    to_request_response(req_res, request.id)
                                 }
 
                                 WebsocketClientMessageData::NewMessage(req_data) => {
@@ -343,11 +335,7 @@ async fn websocket(
                                     .await
                                     .map(|data| WebsocketServerResData::NewMessage(data));
 
-                                    let res = to_request_response(req_res, request.id);
-
-                                    if let Ok(string_payload) = serde_json::to_string(&res) {
-                                        session.text(string_payload).await.unwrap();
-                                    }
+                                    to_request_response(req_res, request.id)
                                 }
 
                                 WebsocketClientMessageData::GetChats => {
@@ -355,12 +343,12 @@ async fn websocket(
                                         .await
                                         .map(|data| WebsocketServerResData::GetChats(data));
 
-                                    let res = to_request_response(req_res, request.id);
-
-                                    if let Ok(string_payload) = serde_json::to_string(&res) {
-                                        session.text(string_payload).await.unwrap();
-                                    }
+                                    to_request_response(req_res, request.id)
                                 }
+                            };
+
+                            if let Ok(string_payload) = serde_json::to_string(&res) {
+                                session.text(string_payload).await.unwrap();
                             }
                         }
                     }
