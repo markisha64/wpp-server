@@ -357,8 +357,17 @@ async fn websocket(
                         }
                     }
 
-                    AggregatedMessage::Binary(_bytes) => {
+                    AggregatedMessage::Binary(bytes) => {
                         last_heartbeat = Instant::now();
+
+                        if let Ok(request) = bincode::deserialize::<WebsocketClientMessage>(&bytes)
+                        {
+                            let res = request_handler(request, ws_server.clone(), &user).await;
+
+                            if let Ok(bytes_payload) = bincode::serialize(&res) {
+                                session.binary(bytes_payload).await.unwrap();
+                            }
+                        }
                     }
                 },
 
