@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use actix_web::{web, HttpRequest, Responder};
+use actix_web::{error, web, HttpRequest, Responder};
 use actix_ws::{self, AggregatedMessage};
 use futures_util::{
     future::{select, Either},
@@ -300,7 +300,14 @@ async fn websocket(
     body: web::Payload,
     user: web::ReqData<Claims>,
     ws_server: web::Data<WebsocketSeverHandle>,
+    notif_fmt: web::Path<String>,
 ) -> actix_web::Result<impl Responder> {
+    let notif_fmt = notif_fmt.into_inner();
+
+    if notif_fmt != "binary" && notif_fmt != "json" {
+        return Err(error::ErrorBadRequest("invalid notif format"));
+    }
+
     let (res, mut session, msg_stream) = actix_ws::handle(&req, body)?;
 
     actix_web::rt::spawn(async move {
@@ -379,11 +386,19 @@ async fn websocket(
                 // ws stream end
                 Either::Left((Either::Left((None, _)), _)) => break None,
 
-                Either::Left((Either::Right((Some(ws_msg), _)), _)) => {
-                    if let Ok(notif) = serde_json::to_string(&ws_msg) {
-                        let _ = session.text(notif).await;
+                Either::Left((Either::Right((Some(ws_msg), _)), _)) => match notif_fmt.as_str() {
+                    "binary" => {
+                        if let Ok(bytes) = bincode::serialize(&ws_msg) {
+                            let _ = session.binary(bytes).await;
+                        }
                     }
-                }
+                    "json" => {
+                        if let Ok(notif) = serde_json::to_string(&ws_msg) {
+                            let _ = session.text(notif).await;
+                        }
+                    }
+                    _ => unreachable!("you can't be here :?"),
+                },
 
                 Either::Left((Either::Right((None, _)), _)) => unreachable!(
                     "all connection message senders were dropped; ws server may have panicked"
@@ -408,5 +423,5 @@ async fn websocket(
 }
 
 pub fn config(cfg: &mut web::ServiceConfig) {
-    cfg.route("/", web::get().to(websocket));
+    cfg.route("/{notif_fmt}", web::get().to(websocket));
 }
