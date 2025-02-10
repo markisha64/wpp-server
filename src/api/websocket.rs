@@ -18,6 +18,7 @@ use uuid::Uuid;
 use crate::{
     models::{chat::Chat, chat_message::ChatMessageSafe},
     mongodb::MongoDatabase,
+    redis::RedisHandle,
 };
 use tokio::{
     sync::{mpsc, oneshot},
@@ -256,6 +257,7 @@ fn to_request_response(
 async fn request_handler(
     request: WebsocketClientMessage,
     ws_server: web::Data<WebsocketSeverHandle>,
+    redis_handle: web::Data<RedisHandle>,
     user: &web::ReqData<Claims>,
 ) -> WebsocketServerMessage {
     let ws_server = ws_server.clone();
@@ -278,9 +280,10 @@ async fn request_handler(
         }
 
         WebsocketClientMessageData::NewMessage(req_data) => {
-            let req_res = message::create(ws_server.db.clone(), &user, ws_server.clone(), req_data)
-                .await
-                .map(|data| WebsocketServerResData::NewMessage(data));
+            let req_res =
+                message::create(ws_server.db.clone(), &user, redis_handle.clone(), req_data)
+                    .await
+                    .map(|data| WebsocketServerResData::NewMessage(data));
 
             to_request_response(req_res, request.id)
         }
@@ -300,6 +303,7 @@ async fn websocket(
     body: web::Payload,
     user: web::ReqData<Claims>,
     ws_server: web::Data<WebsocketSeverHandle>,
+    redis_handle: web::Data<RedisHandle>,
     notif_fmt: web::Path<String>,
 ) -> actix_web::Result<impl Responder> {
     let notif_fmt = notif_fmt.into_inner();
@@ -356,7 +360,13 @@ async fn websocket(
                         if let Ok(request) = serde_json::from_str::<WebsocketClientMessage>(
                             payload.to_string().as_str(),
                         ) {
-                            let res = request_handler(request, ws_server.clone(), &user).await;
+                            let res = request_handler(
+                                request,
+                                ws_server.clone(),
+                                redis_handle.clone(),
+                                &user,
+                            )
+                            .await;
 
                             if let Ok(string_payload) = serde_json::to_string(&res) {
                                 session.text(string_payload).await.unwrap();
@@ -369,7 +379,13 @@ async fn websocket(
 
                         if let Ok(request) = bincode::deserialize::<WebsocketClientMessage>(&bytes)
                         {
-                            let res = request_handler(request, ws_server.clone(), &user).await;
+                            let res = request_handler(
+                                request,
+                                ws_server.clone(),
+                                redis_handle.clone(),
+                                &user,
+                            )
+                            .await;
 
                             if let Ok(bytes_payload) = bincode::serialize(&res) {
                                 session.binary(bytes_payload).await.unwrap();

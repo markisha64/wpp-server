@@ -12,6 +12,7 @@ use crate::{
         chat_message::{ChatMessage, ChatMessageSafe},
     },
     mongodb::MongoDatabase,
+    redis::RedisHandle,
 };
 
 use super::{
@@ -28,7 +29,7 @@ pub struct CreateRequest {
 pub async fn create(
     db: web::Data<MongoDatabase>,
     user: &web::ReqData<Claims>,
-    ws_server: web::Data<WebsocketSeverHandle>,
+    redis_handle: web::Data<RedisHandle>,
     request: CreateRequest,
 ) -> anyhow::Result<ChatMessageSafe> {
     let chat_collection = db.database.collection::<Chat>("chats");
@@ -77,7 +78,7 @@ pub async fn create(
     let notif_payload = WebsocketServerMessage::NewMessage(message.clone().into());
 
     actix_web::rt::spawn(async move {
-        ws_server
+        redis_handle
             .send_message_to_users(&chat.user_ids, notif_payload)
             .await;
     });
