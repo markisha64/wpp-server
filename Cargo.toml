@@ -21,3 +21,6 @@ uuid = "1.13.1"
 
 [build]
 rustflags = ["-Z", "threads=8"]
+
+[features]
+binary_fmt = []
