@@ -5,7 +5,7 @@ use anyhow::Context;
 use mongodb::bson::{doc, oid::ObjectId, DateTime};
 use serde::{Deserialize, Serialize};
 
-use futures_util::try_join;
+use futures_util::{try_join, TryStreamExt};
 
 use crate::{
     models::{chat::Chat, chat_message::ChatMessage},
@@ -113,4 +113,21 @@ pub async fn join(
         .await?;
 
     Ok(JoinResponse {})
+}
+
+pub async fn get_chats(
+    db: web::Data<MongoDatabase>,
+    user: &web::ReqData<Claims>,
+) -> anyhow::Result<Vec<Chat>> {
+    let collection = db.database.collection::<Chat>("chats");
+
+    let chats = collection
+        .find(doc! {
+            "user_ids": &user.user.id
+        })
+        .await?
+        .try_collect::<Vec<_>>()
+        .await?;
+
+    Ok(chats)
 }

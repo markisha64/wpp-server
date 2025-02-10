@@ -49,6 +49,7 @@ pub enum WebsocketServerResData {
     // chat routes
     CreateChat(Chat),
     JoinChat(JoinResponse),
+    GetChats(Vec<Chat>),
 
     // message routes
     NewMessage(ChatMessageSafe),
@@ -66,6 +67,7 @@ pub enum WebsocketClientMessageData {
     // chat routes
     CreateChat(crate::api::chat::CreateRequest),
     JoinChat(String),
+    GetChats,
 
     // message routes
     NewMessage(crate::api::message::CreateRequest),
@@ -340,6 +342,18 @@ async fn websocket(
                                     )
                                     .await
                                     .map(|data| WebsocketServerResData::NewMessage(data));
+
+                                    let res = to_request_response(req_res, request.id);
+
+                                    if let Ok(string_payload) = serde_json::to_string(&res) {
+                                        session.text(string_payload).await.unwrap();
+                                    }
+                                }
+
+                                WebsocketClientMessageData::GetChats => {
+                                    let req_res = chat::get_chats(ws_server.db.clone(), &user)
+                                        .await
+                                        .map(|data| WebsocketServerResData::GetChats(data));
 
                                     let res = to_request_response(req_res, request.id);
 
