@@ -64,11 +64,19 @@ impl RedisHandler {
         sink.subscribe("sync_messages").await?;
 
         loop {
-            let mut rx = pin!(stream.next());
+            let rx = pin!(stream.next());
             let msg_rx = pin!(self.msg_rx.recv());
 
             match select(msg_rx, rx).await {
-                Either::Right((msg, _)) => {}
+                Either::Right((Some(msg), _)) => {
+                    if let Ok(bytes) = msg.get_payload::<Vec<u8>>() {
+                        if let Ok(msg) = bincode::deserialize::<RedisSyncMessage>(&bytes[..]) {
+                            self.ws_server
+                                .send_message_to_users(&msg.user_ids, msg.message.clone())
+                                .await;
+                        }
+                    }
+                }
 
                 Either::Left((Some(msg), _)) => {
                     // send to self

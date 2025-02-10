@@ -15,10 +15,7 @@ use crate::{
     redis::RedisHandle,
 };
 
-use super::{
-    user::Claims,
-    websocket::{WebsocketServerMessage, WebsocketSeverHandle},
-};
+use super::{user::Claims, websocket::WebsocketServerMessage};
 
 #[derive(Serialize, Deserialize)]
 pub struct CreateRequest {
