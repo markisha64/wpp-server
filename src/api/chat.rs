@@ -83,11 +83,9 @@ pub struct JoinResponse {}
 pub async fn join(
     db: web::Data<MongoDatabase>,
     user: &web::ReqData<Claims>,
-    id: String,
+    chat_id: ObjectId,
 ) -> anyhow::Result<JoinResponse> {
     let collection = db.database.collection::<Chat>("chats");
-
-    let chat_id = ObjectId::parse_str(id)?;
 
     let chat = collection
         .find_one(doc! {

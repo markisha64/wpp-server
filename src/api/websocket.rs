@@ -66,7 +66,7 @@ pub struct WebsocketClientMessage {
 pub enum WebsocketClientMessageData {
     // chat routes
     CreateChat(crate::api::chat::CreateRequest),
-    JoinChat(String),
+    JoinChat(ObjectId),
     GetChats,
 
     // message routes
