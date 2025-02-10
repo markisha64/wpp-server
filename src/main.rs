@@ -2,6 +2,7 @@ use api::{user::Claims, websocket::WebsocketServer};
 use dotenv::dotenv;
 use jwt::{JwtAuth, JwtSignService};
 use mongodb::MongoDatabase;
+use std::env;
 
 use actix_web::{web, App, HttpServer};
 use tokio::{task::spawn, try_join};
@@ -39,7 +40,10 @@ async fn main() -> std::io::Result<()> {
                     .configure(api::websocket::config),
             )
     })
-    .bind("127.0.0.1:3030")?
+    .bind(format!(
+        "127.0.0.1:{}",
+        env::var("PORT").unwrap_or("3030".to_string())
+    ))?
     .run();
 
     try_join!(http_fut, async move { ws_fut.await.unwrap() })?;
