@@ -253,6 +253,48 @@ fn to_request_response(
     }
 }
 
+async fn request_handler(
+    request: WebsocketClientMessage,
+    ws_server: web::Data<WebsocketSeverHandle>,
+    user: &web::ReqData<Claims>,
+) -> WebsocketServerMessage {
+    let ws_server = ws_server.clone();
+
+    match request.data {
+        WebsocketClientMessageData::CreateChat(req_data) => {
+            let req_res = chat::create(ws_server.db.clone(), &user, req_data)
+                .await
+                .map(|data| WebsocketServerResData::CreateChat(data));
+
+            to_request_response(req_res, request.id)
+        }
+
+        WebsocketClientMessageData::JoinChat(id) => {
+            let req_res = chat::join(ws_server.db.clone(), &user, id)
+                .await
+                .map(|data| WebsocketServerResData::JoinChat(data));
+
+            to_request_response(req_res, request.id)
+        }
+
+        WebsocketClientMessageData::NewMessage(req_data) => {
+            let req_res = message::create(ws_server.db.clone(), &user, ws_server.clone(), req_data)
+                .await
+                .map(|data| WebsocketServerResData::NewMessage(data));
+
+            to_request_response(req_res, request.id)
+        }
+
+        WebsocketClientMessageData::GetChats => {
+            let req_res = chat::get_chats(ws_server.db.clone(), &user)
+                .await
+                .map(|data| WebsocketServerResData::GetChats(data));
+
+            to_request_response(req_res, request.id)
+        }
+    }
+}
+
 async fn websocket(
     req: HttpRequest,
     body: web::Payload,
@@ -307,45 +349,7 @@ async fn websocket(
                         if let Ok(request) = serde_json::from_str::<WebsocketClientMessage>(
                             payload.to_string().as_str(),
                         ) {
-                            let res = match request.data {
-                                WebsocketClientMessageData::CreateChat(req_data) => {
-                                    let req_res =
-                                        chat::create(ws_server.db.clone(), &user, req_data)
-                                            .await
-                                            .map(|data| WebsocketServerResData::CreateChat(data));
-
-                                    to_request_response(req_res, request.id)
-                                }
-
-                                WebsocketClientMessageData::JoinChat(id) => {
-                                    let req_res = chat::join(ws_server.db.clone(), &user, id)
-                                        .await
-                                        .map(|data| WebsocketServerResData::JoinChat(data));
-
-                                    to_request_response(req_res, request.id)
-                                }
-
-                                WebsocketClientMessageData::NewMessage(req_data) => {
-                                    let req_res = message::create(
-                                        ws_server.db.clone(),
-                                        &user,
-                                        ws_server.clone(),
-                                        req_data,
-                                    )
-                                    .await
-                                    .map(|data| WebsocketServerResData::NewMessage(data));
-
-                                    to_request_response(req_res, request.id)
-                                }
-
-                                WebsocketClientMessageData::GetChats => {
-                                    let req_res = chat::get_chats(ws_server.db.clone(), &user)
-                                        .await
-                                        .map(|data| WebsocketServerResData::GetChats(data));
-
-                                    to_request_response(req_res, request.id)
-                                }
-                            };
+                            let res = request_handler(request, ws_server.clone(), &user).await;
 
                             if let Ok(string_payload) = serde_json::to_string(&res) {
                                 session.text(string_payload).await.unwrap();
