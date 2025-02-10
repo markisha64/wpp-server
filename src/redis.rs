@@ -1,19 +1,19 @@
 use std::{env, pin::pin};
 
+use actix_web::web;
 use futures_util::{
     future::{select, Either},
     StreamExt,
 };
 use mongodb::bson::oid::ObjectId;
-use redis::{AsyncCommands, Client};
+use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{self, unbounded_channel};
 
 use crate::api::websocket::{WebsocketServerMessage, WebsocketSeverHandle};
 
 pub struct RedisHandler {
-    client: Client,
-    ws_server: WebsocketSeverHandle,
+    ws_server: web::Data<WebsocketSeverHandle>,
     msg_rx: mpsc::UnboundedReceiver<RedisSyncMessage>,
 }
 
@@ -42,24 +42,16 @@ pub struct RedisSyncMessage {
 }
 
 impl RedisHandler {
-    pub fn new(ws_server: WebsocketSeverHandle) -> anyhow::Result<(Self, RedisHandle)> {
+    pub fn new(ws_server: web::Data<WebsocketSeverHandle>) -> anyhow::Result<(Self, RedisHandle)> {
         let (msg_tx, msg_rx) = unbounded_channel();
 
-        let client = redis::Client::open(env::var("REDIS_URL")?)?;
-
-        Ok((
-            Self {
-                client,
-                ws_server,
-                msg_rx,
-            },
-            RedisHandle { msg_tx },
-        ))
+        Ok((Self { ws_server, msg_rx }, RedisHandle { msg_tx }))
     }
 
     pub async fn run(mut self) -> anyhow::Result<()> {
-        let (mut sink, mut stream) = self.client.get_async_pubsub().await?.split();
-        let mut con = self.client.get_multiplexed_async_connection().await?;
+        let client = redis::Client::open(env::var("REDIS_URL")?)?;
+        let (mut sink, mut stream) = client.get_async_pubsub().await?.split();
+        let mut con = client.get_multiplexed_async_connection().await?;
 
         sink.subscribe("sync_messages").await?;
 

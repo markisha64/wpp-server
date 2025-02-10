@@ -28,8 +28,10 @@ async fn main() -> std::io::Result<()> {
 
     let (ws_server, server_tx) = WebsocketServer::new(mongo_database.to_owned());
 
+    let ws_handle = web::Data::new(server_tx);
+
     let (redis_handler, redis_handle) =
-        RedisHandler::new(server_tx.clone()).expect("Failed to create redis handler");
+        RedisHandler::new(ws_handle.clone()).expect("Failed to create redis handler");
 
     let ws_fut = spawn(ws_server.run());
 
@@ -39,7 +41,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .app_data(mongo_database.to_owned())
             .app_data(jwt_service.to_owned())
-            .app_data(web::Data::new(server_tx.clone()))
+            .app_data(ws_handle.clone())
             .app_data(web::Data::new(redis_handle.clone()))
             .service(web::scope("/user").configure(api::user::config))
             .service(
