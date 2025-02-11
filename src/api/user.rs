@@ -4,31 +4,13 @@ use actix_web::{error, web, Responder};
 use anyhow::Context;
 use bcrypt::{hash, verify};
 use mongodb::bson::doc;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
-use crate::{
-    jwt::JwtSignService,
-    models::{self, user::UserSafe},
-    mongodb::MongoDatabase,
+use crate::{jwt::JwtSignService, mongodb::MongoDatabase};
+use shared::{
+    api::user::{AuthResponse, Claims, RegisterRequest},
+    models::{self},
 };
-
-#[derive(Deserialize)]
-struct RegisterRequest {
-    email: String,
-    password: String,
-    display_name: String,
-}
-
-#[derive(Serialize)]
-struct AuthResponse {
-    token: String,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct Claims {
-    pub user: UserSafe,
-    exp: usize,
-}
 
 async fn register(
     db: web::Data<MongoDatabase>,

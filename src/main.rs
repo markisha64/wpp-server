@@ -1,8 +1,9 @@
-use api::{user::Claims, websocket::WebsocketServer};
+use api::websocket::WebsocketServer;
 use dotenv::dotenv;
 use jwt::{JwtAuth, JwtSignService};
 use mongodb::MongoDatabase;
 use redis::RedisHandler;
+use shared::api::user::Claims;
 use std::{env, io};
 
 use actix_web::{web, App, HttpServer};
@@ -10,7 +11,6 @@ use tokio::{task::spawn, try_join};
 
 mod api;
 mod jwt;
-mod models;
 mod mongodb;
 mod redis;
 

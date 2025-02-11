@@ -15,10 +15,17 @@ futures-util = "0.3.31"
 jsonwebtoken = { default-features = false, version = "9.3.0" }
 mongodb = "3.2.0"
 redis = { version = "0.28.2", features = ["tokio-comp"] }
-serde = { version = "1.0.217", default-features = false }
+serde = { version = "1.0.217", features = ["derive"] }
 serde_json = "1.0.138"
 tokio = "1.43.0"
 uuid = "1.13.1"
 
+shared = { path = "./shared" }
+
 [build]
 rustflags = ["-Z", "threads=8"]
+
+[workspace]
+members = [
+  "shared"
+]

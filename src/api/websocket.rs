@@ -12,67 +12,27 @@ use futures_util::{
     StreamExt as _,
 };
 use mongodb::bson::oid::ObjectId;
-use serde::{Deserialize, Serialize};
+use shared::api::{
+    user::Claims,
+    websocket::{
+        WebsocketClientMessage, WebsocketClientMessageData, WebsocketServerMessage,
+        WebsocketServerResData,
+    },
+};
 use uuid::Uuid;
 
-use crate::{
-    models::{chat::Chat, chat_message::ChatMessageSafe},
-    mongodb::MongoDatabase,
-    redis::RedisHandle,
-};
+use crate::{mongodb::MongoDatabase, redis::RedisHandle};
 use tokio::{
     sync::{mpsc, oneshot},
     time::interval,
 };
 
 use super::{
-    chat::{self, JoinResponse},
+    chat::{self},
     message,
-    user::Claims,
 };
 
 type ConnId = Uuid;
-
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(tag = "t", content = "c")]
-pub enum WebsocketServerMessage {
-    NewMessage(ChatMessageSafe),
-    RequestResponse {
-        id: Uuid,
-        data: Option<WebsocketServerResData>,
-        error: Option<String>,
-    },
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(tag = "t", content = "c")]
-pub enum WebsocketServerResData {
-    // chat routes
-    CreateChat(Chat),
-    JoinChat(JoinResponse),
-    GetChats(Vec<Chat>),
-
-    // message routes
-    NewMessage(ChatMessageSafe),
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct WebsocketClientMessage {
-    id: Uuid,
-    data: WebsocketClientMessageData,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "t", content = "c")]
-pub enum WebsocketClientMessageData {
-    // chat routes
-    CreateChat(crate::api::chat::CreateRequest),
-    JoinChat(ObjectId),
-    GetChats,
-
-    // message routes
-    NewMessage(crate::api::message::CreateRequest),
-}
 
 enum Command {
     Connect {

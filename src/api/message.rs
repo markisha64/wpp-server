@@ -3,25 +3,16 @@ use std::future::IntoFuture;
 use actix_web::web;
 use anyhow::{anyhow, Context};
 use futures_util::try_join;
-use mongodb::bson::{doc, oid::ObjectId, DateTime};
-use serde::{Deserialize, Serialize};
+use mongodb::bson::{doc, DateTime};
 
-use crate::{
+use crate::{mongodb::MongoDatabase, redis::RedisHandle};
+use shared::{
+    api::{message::CreateRequest, user::Claims, websocket::WebsocketServerMessage},
     models::{
         chat::Chat,
         chat_message::{ChatMessage, ChatMessageSafe},
     },
-    mongodb::MongoDatabase,
-    redis::RedisHandle,
 };
-
-use super::{user::Claims, websocket::WebsocketServerMessage};
-
-#[derive(Serialize, Deserialize)]
-pub struct CreateRequest {
-    chat_id: ObjectId,
-    content: String,
-}
 
 pub async fn create(
     db: web::Data<MongoDatabase>,

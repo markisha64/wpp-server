@@ -8,9 +8,10 @@ use futures_util::{
 use mongodb::bson::oid::ObjectId;
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
+use shared::api::websocket::WebsocketServerMessage;
 use tokio::sync::mpsc::{self, unbounded_channel};
 
-use crate::api::websocket::{WebsocketServerMessage, WebsocketSeverHandle};
+use crate::api::websocket::WebsocketSeverHandle;
 
 pub struct RedisHandler {
     ws_server: web::Data<WebsocketSeverHandle>,

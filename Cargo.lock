@@ -1912,6 +1912,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "shared"
+version = "0.1.0"
+dependencies = [
+ "mongodb",
+ "serde",
+ "uuid",
+]
+
+[[package]]
 name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2581,6 +2590,7 @@ dependencies = [
  "redis",
  "serde",
  "serde_json",
+ "shared",
  "tokio",
  "uuid",
 ]

@@ -3,21 +3,18 @@ use std::future::IntoFuture;
 use actix_web::web;
 use anyhow::Context;
 use mongodb::bson::{doc, oid::ObjectId, DateTime};
-use serde::{Deserialize, Serialize};
 
 use futures_util::{try_join, TryStreamExt};
 
-use crate::{
+use shared::{
+    api::{
+        chat::{CreateRequest, JoinResponse},
+        user::Claims,
+    },
     models::{chat::Chat, chat_message::ChatMessage},
-    mongodb::MongoDatabase,
 };
 
-use super::user::Claims;
-
-#[derive(Serialize, Deserialize)]
-pub struct CreateRequest {
-    pub name: String,
-}
+use crate::mongodb::MongoDatabase;
 
 pub async fn create(
     db: web::Data<MongoDatabase>,
@@ -76,9 +73,6 @@ pub async fn create(
 
     Ok(chat)
 }
-
-#[derive(Deserialize, Serialize, Clone)]
-pub struct JoinResponse {}
 
 pub async fn join(
     db: web::Data<MongoDatabase>,
