@@ -4,7 +4,6 @@ use actix_web::{error, web, Responder};
 use anyhow::Context;
 use bcrypt::{hash, verify};
 use mongodb::bson::doc;
-use serde::Deserialize;
 
 use crate::{jwt::JwtSignService, mongodb::MongoDatabase};
 use shared::{
