@@ -1,6 +1,6 @@
 use std::{env, pin::pin};
 
-use actix_web::web;
+use actix_web::{rt::signal, web};
 use futures_util::{
     future::{select, Either},
     StreamExt,
@@ -59,9 +59,12 @@ impl RedisHandler {
         loop {
             let rx = pin!(stream.next());
             let msg_rx = pin!(self.msg_rx.recv());
+            let close = pin!(signal::ctrl_c());
 
-            match select(msg_rx, rx).await {
-                Either::Right((Some(msg), _)) => {
+            let s1 = select(rx, close);
+
+            match select(msg_rx, s1).await {
+                Either::Right((Either::Left((Some(msg), _)), _)) => {
                     if let Ok(bytes) = msg.get_payload::<Vec<u8>>() {
                         if let Ok(msg) = bincode::deserialize::<RedisSyncMessage>(&bytes[..]) {
                             self.ws_server
@@ -82,8 +85,16 @@ impl RedisHandler {
                     }
                 }
 
+                // close signal
+                Either::Right((Either::Right(_), _)) => {
+                    break;
+                }
+
+                // None from rx?
                 _ => {}
             }
         }
+
+        Ok(())
     }
 }
