@@ -8,7 +8,7 @@ use serde::Deserialize;
 
 use crate::{jwt::JwtSignService, mongodb::MongoDatabase};
 use shared::{
-    api::user::{AuthResponse, Claims, RegisterRequest},
+    api::user::{AuthResponse, Claims, LoginRequest, RegisterRequest},
     models::{self},
 };
 
@@ -58,12 +58,6 @@ async fn register(
         .map_err(|err| error::ErrorInternalServerError(err))?;
 
     Ok(web::Json(AuthResponse { token }))
-}
-
-#[derive(Deserialize)]
-struct LoginRequest {
-    email: String,
-    password: String,
 }
 
 async fn login(

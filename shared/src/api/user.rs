@@ -10,6 +10,12 @@ pub struct RegisterRequest {
 }
 
 #[derive(Serialize, Deserialize)]
+pub struct LoginRequest {
+    pub email: String,
+    pub password: String,
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct AuthResponse {
     pub token: String,
 }
