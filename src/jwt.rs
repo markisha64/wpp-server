@@ -1,6 +1,6 @@
-use std::env;
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::{collections::HashMap, env};
 
 use futures_util::future::LocalBoxFuture;
 use jsonwebtoken::{decode, DecodingKey, Validation};
@@ -12,7 +12,8 @@ use actix_web::{
     dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
     error::ErrorUnauthorized,
     http::header,
-    web, Error, HttpMessage,
+    web::{self, Query},
+    Error, HttpMessage,
 };
 use jsonwebtoken::{encode, EncodingKey, Header};
 
@@ -119,10 +120,19 @@ where
 }
 
 fn extract_token(req: &ServiceRequest) -> Option<String> {
-    req.headers()
-        .get(header::AUTHORIZATION)?
-        .to_str()
-        .ok()?
-        .strip_prefix("Bearer ")
-        .map(|s| s.to_string())
+    let htoken = req
+        .headers()
+        .get(header::AUTHORIZATION)
+        .map(|x| x.to_str().ok())
+        .flatten()
+        .map(|x| x.strip_prefix("Bearer"))
+        .flatten()
+        .map(|s| s.to_string());
+
+    let query = Query::<HashMap<String, String>>::from_query(req.query_string()).ok();
+
+    query
+        .map(|x| x.get("jwt_token").cloned())
+        .flatten()
+        .or(htoken)
 }
