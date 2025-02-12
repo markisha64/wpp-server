@@ -8,7 +8,6 @@ actix-web = { features = ["macros", "compress-gzip", "compress-brotli", "compres
 actix-ws = "0.3.0"
 anyhow = { default-features = false, version = "1.0.95" }
 bcrypt = { features = ["std"], default-features = false, version = "0.17.0" }
-bincode = "1.3.3"
 chrono = { default-features = false, version = "0.4.39" }
 dotenv = "0.15.0"
 futures-util = "0.3.31"

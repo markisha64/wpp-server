@@ -65,8 +65,8 @@ impl RedisHandler {
 
             match select(msg_rx, s1).await {
                 Either::Right((Either::Left((Some(msg), _)), _)) => {
-                    if let Ok(bytes) = msg.get_payload::<Vec<u8>>() {
-                        if let Ok(msg) = bincode::deserialize::<RedisSyncMessage>(&bytes[..]) {
+                    if let Ok(payload) = msg.get_payload::<String>() {
+                        if let Ok(msg) = serde_json::from_str::<RedisSyncMessage>(&payload) {
                             self.ws_server
                                 .send_message_to_users(&msg.user_ids, msg.message.clone())
                                 .await;
@@ -80,8 +80,8 @@ impl RedisHandler {
                         .send_message_to_users(&msg.user_ids, msg.message.clone())
                         .await;
 
-                    if let Ok(bytes) = bincode::serialize(&msg) {
-                        let _ = con.publish::<_, _, String>("sync_messages", bytes).await;
+                    if let Ok(payload) = serde_json::to_string(&msg) {
+                        let _ = con.publish::<_, _, String>("sync_messages", payload).await;
                     }
                 }
 

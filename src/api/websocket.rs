@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use actix_web::{error, web, HttpRequest, Responder};
+use actix_web::{web, HttpRequest, Responder};
 use actix_ws::{self, AggregatedMessage};
 use futures_util::{
     future::{select, Either},
@@ -264,14 +264,7 @@ async fn websocket(
     user: web::ReqData<Claims>,
     ws_server: web::Data<WebsocketSeverHandle>,
     redis_handle: web::Data<RedisHandle>,
-    notif_fmt: web::Path<String>,
 ) -> actix_web::Result<impl Responder> {
-    let notif_fmt = notif_fmt.into_inner();
-
-    if notif_fmt != "binary" && notif_fmt != "json" {
-        return Err(error::ErrorBadRequest("invalid notif format"));
-    }
-
     let (res, mut session, msg_stream) = actix_ws::handle(&req, body)?;
 
     actix_web::rt::spawn(async move {
@@ -334,23 +327,8 @@ async fn websocket(
                         }
                     }
 
-                    AggregatedMessage::Binary(bytes) => {
+                    AggregatedMessage::Binary(_) => {
                         last_heartbeat = Instant::now();
-
-                        if let Ok(request) = bincode::deserialize::<WebsocketClientMessage>(&bytes)
-                        {
-                            let res = request_handler(
-                                request,
-                                ws_server.clone(),
-                                redis_handle.clone(),
-                                &user,
-                            )
-                            .await;
-
-                            if let Ok(bytes_payload) = bincode::serialize(&res) {
-                                session.binary(bytes_payload).await.unwrap();
-                            }
-                        }
                     }
                 },
 
@@ -362,19 +340,11 @@ async fn websocket(
                 // ws stream end
                 Either::Left((Either::Left((None, _)), _)) => break None,
 
-                Either::Left((Either::Right((Some(ws_msg), _)), _)) => match notif_fmt.as_str() {
-                    "binary" => {
-                        if let Ok(bytes) = bincode::serialize(&ws_msg) {
-                            let _ = session.binary(bytes).await;
-                        }
+                Either::Left((Either::Right((Some(ws_msg), _)), _)) => {
+                    if let Ok(notif) = serde_json::to_string(&ws_msg) {
+                        let _ = session.text(notif).await;
                     }
-                    "json" => {
-                        if let Ok(notif) = serde_json::to_string(&ws_msg) {
-                            let _ = session.text(notif).await;
-                        }
-                    }
-                    _ => unreachable!("you can't be here :?"),
-                },
+                }
 
                 Either::Left((Either::Right((None, _)), _)) => unreachable!(
                     "all connection message senders were dropped; ws server may have panicked"
