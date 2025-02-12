@@ -1,8 +1,7 @@
-use std::future::IntoFuture;
-
 use actix_web::web;
 use anyhow::Context;
 use mongodb::bson::{doc, oid::ObjectId, DateTime};
+use std::future::IntoFuture;
 
 use futures_util::{try_join, TryStreamExt};
 
@@ -11,7 +10,10 @@ use shared::{
         chat::{CreateRequest, JoinResponse},
         user::Claims,
     },
-    models::{chat::Chat, chat_message::ChatMessage},
+    models::{
+        chat::{Chat, ChatSafe},
+        chat_message::ChatMessage,
+    },
 };
 
 use crate::mongodb::MongoDatabase;
@@ -110,8 +112,8 @@ pub async fn join(
 pub async fn get_chats(
     db: web::Data<MongoDatabase>,
     user: &web::ReqData<Claims>,
-) -> anyhow::Result<Vec<Chat>> {
-    let collection = db.database.collection::<Chat>("chats");
+) -> anyhow::Result<Vec<ChatSafe>> {
+    let collection = db.database.collection::<ChatSafe>("chats");
 
     let chats = collection
         .find(doc! {
