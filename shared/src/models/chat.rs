@@ -23,6 +23,7 @@ pub struct ChatSafe {
     pub user_ids: Vec<ObjectId>,
     pub first_message_ts: Option<DateTime>,
     pub last_message_ts: Option<DateTime>,
+    #[serde(default = "Vec::new")]
     pub messages: Vec<ChatMessageSafe>,
 }
 
