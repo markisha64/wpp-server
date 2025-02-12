@@ -369,5 +369,5 @@ async fn websocket(
 }
 
 pub fn config(cfg: &mut web::ServiceConfig) {
-    cfg.route("/{notif_fmt}", web::get().to(websocket));
+    cfg.route("/", web::get().to(websocket));
 }
