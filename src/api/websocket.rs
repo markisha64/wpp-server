@@ -239,6 +239,14 @@ async fn request_handler(
             to_request_response(req_res, request.id)
         }
 
+        WebsocketClientMessageData::GetChats => {
+            let req_res = chat::get_chats(ws_server.db.clone(), &user)
+                .await
+                .map(|data| WebsocketServerResData::GetChats(data));
+
+            to_request_response(req_res, request.id)
+        }
+
         WebsocketClientMessageData::NewMessage(req_data) => {
             let req_res =
                 message::create(ws_server.db.clone(), &user, redis_handle.clone(), req_data)
@@ -248,10 +256,10 @@ async fn request_handler(
             to_request_response(req_res, request.id)
         }
 
-        WebsocketClientMessageData::GetChats => {
-            let req_res = chat::get_chats(ws_server.db.clone(), &user)
+        WebsocketClientMessageData::GetMessages(req_data) => {
+            let req_res = message::get_messages(ws_server.db.clone(), &user, req_data)
                 .await
-                .map(|data| WebsocketServerResData::GetChats(data));
+                .map(|data| WebsocketServerResData::GetMessages(data));
 
             to_request_response(req_res, request.id)
         }

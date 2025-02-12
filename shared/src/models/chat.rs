@@ -21,8 +21,8 @@ pub struct ChatSafe {
     pub creator: ObjectId,
     pub name: String,
     pub user_ids: Vec<ObjectId>,
-    pub first_message_ts: Option<DateTime>,
-    pub last_message_ts: Option<DateTime>,
+    pub first_message_ts: DateTime,
+    pub last_message_ts: DateTime,
     #[serde(default = "Vec::new")]
     pub messages: Vec<ChatMessageSafe>,
 }
@@ -34,8 +34,12 @@ impl From<Chat> for ChatSafe {
             creator: value.creator,
             name: value.name,
             user_ids: value.user_ids,
-            first_message_ts: value.first_message_ts,
-            last_message_ts: value.last_message_ts,
+            first_message_ts: value
+                .first_message_ts
+                .expect("converting create payloud into safe"),
+            last_message_ts: value
+                .last_message_ts
+                .expect("converting create payloud into safe"),
             messages: Vec::new(),
         }
     }

@@ -31,6 +31,7 @@ pub enum WebsocketServerResData {
 
     // message routes
     NewMessage(ChatMessageSafe),
+    GetMessages(Vec<ChatMessageSafe>),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -49,4 +50,5 @@ pub enum WebsocketClientMessageData {
 
     // message routes
     NewMessage(crate::api::message::CreateRequest),
+    GetMessages(crate::api::message::GetRequest),
 }

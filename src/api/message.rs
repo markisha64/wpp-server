@@ -2,12 +2,16 @@ use std::future::IntoFuture;
 
 use actix_web::web;
 use anyhow::{anyhow, Context};
-use futures_util::try_join;
+use futures_util::{try_join, TryStreamExt};
 use mongodb::bson::{doc, DateTime};
 
 use crate::{mongodb::MongoDatabase, redis::RedisHandle};
 use shared::{
-    api::{message::CreateRequest, user::Claims, websocket::WebsocketServerMessage},
+    api::{
+        message::{CreateRequest, GetRequest},
+        user::Claims,
+        websocket::WebsocketServerMessage,
+    },
     models::{
         chat::Chat,
         chat_message::{ChatMessage, ChatMessageSafe},
@@ -72,4 +76,34 @@ pub async fn create(
     });
 
     Ok(message.into())
+}
+
+pub async fn get_messages(
+    db: web::Data<MongoDatabase>,
+    user: &web::ReqData<Claims>,
+    request: GetRequest,
+) -> anyhow::Result<Vec<ChatMessageSafe>> {
+    let chat_collection = db.database.collection::<Chat>("chats");
+    let collection = db.database.collection::<ChatMessageSafe>("chat_messages");
+
+    let _ = chat_collection
+        .find_one(doc! {
+            "_id": &request.chat_id,
+            "user_ids": &user.user.id
+        })
+        .await?
+        .context("chat not found")?;
+
+    let messages = collection
+        .find(doc! {
+            "chat_id": &request.chat_id,
+            "created_at": {
+                "$lte": &request.last_message_ts
+            }
+        })
+        .await?
+        .try_collect()
+        .await?;
+
+    Ok(messages)
 }
