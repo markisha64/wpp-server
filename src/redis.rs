@@ -75,11 +75,6 @@ impl RedisHandler {
                 }
 
                 Either::Left((Some(msg), _)) => {
-                    // send to self
-                    self.ws_server
-                        .send_message_to_users(&msg.user_ids, msg.message.clone())
-                        .await;
-
                     if let Ok(payload) = serde_json::to_string(&msg) {
                         let _ = con.publish::<_, _, String>("sync_messages", payload).await;
                     }
