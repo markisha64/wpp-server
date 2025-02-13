@@ -1,3 +1,4 @@
+use actix_cors::Cors;
 use api::websocket::WebsocketServer;
 use dotenv::dotenv;
 use jwt::{JwtAuth, JwtSignService};
@@ -6,7 +7,7 @@ use redis::RedisHandler;
 use shared::api::user::Claims;
 use std::{env, io};
 
-use actix_web::{web, App, HttpServer};
+use actix_web::{http, web, App, HttpServer};
 use tokio::{task::spawn, try_join};
 
 mod api;
@@ -38,7 +39,19 @@ async fn main() -> std::io::Result<()> {
     let redis_fut = spawn(redis_handler.run());
 
     let http_fut = HttpServer::new(move || {
+        let cors = Cors::default()
+            .allow_any_origin()
+            .send_wildcard()
+            .allowed_methods(vec!["POST", "GET"])
+            .allowed_headers(vec![
+                http::header::AUTHORIZATION,
+                http::header::ACCEPT,
+                http::header::CONTENT_TYPE,
+            ])
+            .max_age(3600);
+
         App::new()
+            .wrap(cors)
             .app_data(mongo_database.to_owned())
             .app_data(jwt_service.to_owned())
             .app_data(ws_handle.clone())
