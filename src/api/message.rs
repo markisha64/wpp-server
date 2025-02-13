@@ -3,7 +3,10 @@ use std::future::IntoFuture;
 use actix_web::web;
 use anyhow::{anyhow, Context};
 use futures_util::{try_join, TryStreamExt};
-use mongodb::bson::{doc, DateTime};
+use mongodb::{
+    bson::{doc, DateTime},
+    options::FindOptions,
+};
 
 use crate::{mongodb::MongoDatabase, redis::RedisHandle};
 use shared::{
@@ -94,16 +97,20 @@ pub async fn get_messages(
         .await?
         .context("chat not found")?;
 
-    let messages = collection
+    let messages: Vec<_> = collection
         .find(doc! {
             "chat_id": &request.chat_id,
             "created_at": {
-                "$lte": &request.last_message_ts
+                "$lt": &request.last_message_ts
             }
+        })
+        .limit(10)
+        .sort(doc! {
+            "created_at": -1
         })
         .await?
         .try_collect()
         .await?;
 
-    Ok(messages)
+    Ok(Vec::from_iter(messages.into_iter().rev()))
 }
