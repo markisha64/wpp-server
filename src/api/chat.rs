@@ -119,6 +119,9 @@ pub async fn get_chats(
         .find(doc! {
             "user_ids": &user.user.id
         })
+        .sort(doc! {
+            "last_message_ts": -1
+        })
         .await?
         .try_collect::<Vec<_>>()
         .await?;
