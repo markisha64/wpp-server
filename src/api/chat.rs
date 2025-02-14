@@ -1,6 +1,6 @@
 use actix_web::web;
 use anyhow::Context;
-use mongodb::bson::{doc, oid::ObjectId, DateTime};
+use mongodb::bson::{self, doc, oid::ObjectId, DateTime};
 use std::future::IntoFuture;
 
 use futures_util::{try_join, TryStreamExt};
@@ -116,15 +116,32 @@ pub async fn get_chats(
     let collection = db.database.collection::<ChatSafe>("chats");
 
     let chats = collection
-        .find(doc! {
-            "user_ids": &user.user.id
-        })
-        .sort(doc! {
-            "last_message_ts": -1
-        })
+        .aggregate(vec![
+            doc! {
+                "$match": {
+                    "user_ids": &user.user.id
+                }
+            },
+            doc! {
+                "$lookup": {
+                    "from": "users",
+                    "localField": "user_ids",
+                    "foreignField": "_id",
+                    "as": "users"
+                }
+            },
+            doc! {
+                "$sort": {
+                    "last_message_ts": -1
+                }
+            },
+        ])
         .await?
         .try_collect::<Vec<_>>()
-        .await?;
+        .await?
+        .into_iter()
+        .map(|x| bson::from_bson::<ChatSafe>(bson::Bson::Document(x)))
+        .collect::<Result<Vec<_>, _>>()?;
 
     Ok(chats)
 }
