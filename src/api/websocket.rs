@@ -224,7 +224,7 @@ async fn request_handler(
         }
 
         WebsocketClientMessageData::JoinChat(id) => {
-            let req_res = chat::join(ws_server.db.clone(), &user, id)
+            let req_res = chat::join(ws_server.db.clone(), &user, redis_handle.clone(), id)
                 .await
                 .map(|data| WebsocketServerResData::JoinChat(data));
 
