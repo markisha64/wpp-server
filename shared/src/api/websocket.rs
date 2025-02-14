@@ -16,8 +16,7 @@ pub enum WebsocketServerMessage {
     NewMessage(ChatMessageSafe),
     RequestResponse {
         id: Uuid,
-        data: Option<WebsocketServerResData>,
-        error: Option<String>,
+        data: Result<WebsocketServerResData, String>,
     },
 }
 

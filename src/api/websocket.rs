@@ -200,17 +200,9 @@ fn to_request_response(
     res: anyhow::Result<WebsocketServerResData>,
     id: Uuid,
 ) -> WebsocketServerMessage {
-    match res {
-        Ok(data) => WebsocketServerMessage::RequestResponse {
-            id,
-            error: None,
-            data: Some(data),
-        },
-        Err(err) => WebsocketServerMessage::RequestResponse {
-            id,
-            error: Some(format!("{}", err)),
-            data: None,
-        },
+    WebsocketServerMessage::RequestResponse {
+        id,
+        data: res.map_err(|err| format!("{}", err)),
     }
 }
 

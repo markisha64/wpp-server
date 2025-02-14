@@ -3,10 +3,7 @@ use std::future::IntoFuture;
 use actix_web::web;
 use anyhow::{anyhow, Context};
 use futures_util::{try_join, TryStreamExt};
-use mongodb::{
-    bson::{doc, DateTime},
-    options::FindOptions,
-};
+use mongodb::bson::{doc, DateTime};
 
 use crate::{mongodb::MongoDatabase, redis::RedisHandle};
 use shared::{
