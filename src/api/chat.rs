@@ -9,6 +9,7 @@ use shared::{
     api::{
         chat::{CreateRequest, JoinResponse},
         user::Claims,
+        websocket::WebsocketServerMessage,
     },
     models::{
         chat::{Chat, ChatSafe},
@@ -16,7 +17,7 @@ use shared::{
     },
 };
 
-use crate::mongodb::MongoDatabase;
+use crate::{mongodb::MongoDatabase, redis::RedisHandle};
 
 pub async fn create(
     db: web::Data<MongoDatabase>,
@@ -79,9 +80,10 @@ pub async fn create(
 pub async fn join(
     db: web::Data<MongoDatabase>,
     user: &web::ReqData<Claims>,
+    redis_handle: web::Data<RedisHandle>,
     chat_id: ObjectId,
 ) -> anyhow::Result<JoinResponse> {
-    let collection = db.database.collection::<Chat>("chats");
+    let collection = db.database.collection::<ChatSafe>("chats");
 
     let chat = collection
         .find_one(doc! {
@@ -105,6 +107,17 @@ pub async fn join(
             },
         )
         .await?;
+
+    let notif_payload = WebsocketServerMessage::UserJoined {
+        chat_id: chat.id,
+        user: user.user.clone(),
+    };
+
+    actix_web::rt::spawn(async move {
+        redis_handle
+            .send_message_to_users(&chat.user_ids, notif_payload)
+            .await;
+    });
 
     Ok(JoinResponse {})
 }

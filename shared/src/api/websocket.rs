@@ -7,6 +7,7 @@ use crate::{
     models::{
         chat::{Chat, ChatSafe},
         chat_message::ChatMessageSafe,
+        user::UserSafe,
     },
 };
 
@@ -14,6 +15,10 @@ use crate::{
 #[serde(tag = "t", content = "c")]
 pub enum WebsocketServerMessage {
     NewMessage(ChatMessageSafe),
+    UserJoined {
+        chat_id: ObjectId,
+        user: UserSafe,
+    },
     RequestResponse {
         id: Uuid,
         data: Result<WebsocketServerResData, String>,
