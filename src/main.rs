@@ -38,6 +38,12 @@ async fn main() -> std::io::Result<()> {
 
     let redis_fut = spawn(redis_handler.run());
 
+    let addr = format!(
+        "{}:{}",
+        env::var("HOST").unwrap_or("0.0.0.0".to_string()),
+        env::var("PORT").unwrap_or("3030".to_string())
+    );
+
     let http_fut = HttpServer::new(move || {
         let cors = Cors::default()
             .allow_any_origin()
@@ -63,11 +69,10 @@ async fn main() -> std::io::Result<()> {
                     .configure(api::websocket::config),
             )
     })
-    .bind(format!(
-        "127.0.0.1:{}",
-        env::var("PORT").unwrap_or("3030".to_string())
-    ))?
+    .bind(&addr)?
     .run();
+
+    println!("binding on {}", addr);
 
     try_join!(http_fut, async move { ws_fut.await.unwrap() }, async move {
         redis_fut
