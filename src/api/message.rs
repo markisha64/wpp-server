@@ -96,14 +96,11 @@ pub async fn get_messages(
 
     let mut filter = doc! {
         "chat_id": &request.chat_id,
-        "created_at": {
-            "$lt": &request.last_message_ts
-        }
     };
 
     if let Some(ts) = request.last_message_ts {
         filter.insert(
-            "$lt",
+            "created_at",
             doc! {
                 "$lt": ts
             },
