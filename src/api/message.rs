@@ -94,13 +94,24 @@ pub async fn get_messages(
         .await?
         .context("chat not found")?;
 
+    let mut filter = doc! {
+        "chat_id": &request.chat_id,
+        "created_at": {
+            "$lt": &request.last_message_ts
+        }
+    };
+
+    if let Some(ts) = request.last_message_ts {
+        filter.insert(
+            "$lt",
+            doc! {
+                "$lt": ts
+            },
+        );
+    }
+
     let messages: Vec<_> = collection
-        .find(doc! {
-            "chat_id": &request.chat_id,
-            "created_at": {
-                "$lt": &request.last_message_ts
-            }
-        })
+        .find(filter)
         .limit(10)
         .sort(doc! {
             "created_at": -1

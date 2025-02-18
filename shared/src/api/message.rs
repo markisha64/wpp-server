@@ -10,5 +10,5 @@ pub struct CreateRequest {
 #[derive(Serialize, Deserialize)]
 pub struct GetRequest {
     pub chat_id: ObjectId,
-    pub last_message_ts: DateTime,
+    pub last_message_ts: Option<DateTime>,
 }
