@@ -47,16 +47,15 @@ pub async fn create(
 
     let ts = DateTime::now();
 
-    let msg_future = message_collection
-        .insert_one(ChatMessage {
-            id: None,
-            chat_id,
-            creator: None,
-            created_at: ts,
-            deleted_at: None,
-            content: String::from("Chat created"),
-        })
-        .into_future();
+    let mut msg = ChatMessage {
+        id: None,
+        chat_id,
+        creator: None,
+        created_at: ts,
+        deleted_at: None,
+        content: String::from("Chat created"),
+    };
+    let msg_future = message_collection.insert_one(&msg).into_future();
 
     let chat_future = collection
         .update_one(
@@ -72,9 +71,18 @@ pub async fn create(
         )
         .into_future();
 
-    try_join!(msg_future, chat_future)?;
+    let (msg_insert, _) = try_join!(msg_future, chat_future)?;
 
-    Ok(chat.into())
+    msg.id = msg_insert.inserted_id.as_object_id();
+
+    chat.first_message_ts = Some(ts);
+    chat.last_message_ts = Some(ts);
+
+    let mut safe: ChatSafe = chat.into();
+
+    safe.messages.push(msg.into());
+
+    Ok(safe)
 }
 
 pub async fn join(
