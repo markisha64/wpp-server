@@ -23,7 +23,7 @@ pub async fn create(
     db: web::Data<MongoDatabase>,
     user: &web::ReqData<Claims>,
     request: CreateRequest,
-) -> anyhow::Result<Chat> {
+) -> anyhow::Result<ChatSafe> {
     let collection = db.database.collection::<Chat>("chats");
     let message_collection = db.database.collection::<ChatMessage>("chat_messages");
 
@@ -74,7 +74,7 @@ pub async fn create(
 
     try_join!(msg_future, chat_future)?;
 
-    Ok(chat)
+    Ok(chat.into())
 }
 
 pub async fn join(

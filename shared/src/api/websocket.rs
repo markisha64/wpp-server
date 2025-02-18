@@ -4,11 +4,7 @@ use uuid::Uuid;
 
 use crate::{
     api::chat::JoinResponse,
-    models::{
-        chat::{Chat, ChatSafe},
-        chat_message::ChatMessageSafe,
-        user::UserSafe,
-    },
+    models::{chat::ChatSafe, chat_message::ChatMessageSafe, user::UserSafe},
 };
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -29,7 +25,7 @@ pub enum WebsocketServerMessage {
 #[serde(tag = "t", content = "c")]
 pub enum WebsocketServerResData {
     // chat routes
-    CreateChat(Chat),
+    CreateChat(ChatSafe),
     JoinChat(JoinResponse),
     GetChats(Vec<ChatSafe>),
 
