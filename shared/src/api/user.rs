@@ -25,3 +25,8 @@ pub struct Claims {
     pub user: UserSafe,
     pub exp: usize,
 }
+
+#[derive(Serialize, Deserialize)]
+pub struct UpdateRequest {
+    pub display_name: String,
+}

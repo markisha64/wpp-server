@@ -7,7 +7,7 @@ use mongodb::bson::doc;
 
 use crate::{jwt::JwtSignService, mongodb::MongoDatabase};
 use shared::{
-    api::user::{AuthResponse, Claims, LoginRequest, RegisterRequest},
+    api::user::{AuthResponse, Claims, LoginRequest, RegisterRequest, UpdateRequest},
     models::{self},
 };
 
@@ -98,7 +98,33 @@ async fn login(
     Ok(web::Json(AuthResponse { token }))
 }
 
+async fn update(
+    db: web::Data<MongoDatabase>,
+    user: web::ReqData<Claims>,
+    request: web::Json<UpdateRequest>,
+) -> actix_web::Result<impl Responder> {
+    let collection = db.database.collection::<models::user::User>("users");
+
+    let _ = collection
+        .update_one(
+            doc! {
+                "_id": user.user.id
+            },
+            doc! {
+                "display_name": &request.display_name
+            },
+        )
+        .await
+        .map_err(|err| error::ErrorInternalServerError(err))?;
+
+    Ok(web::Json(()))
+}
+
 pub fn config(cfg: &mut web::ServiceConfig) {
     cfg.route("register", web::post().to(register))
         .route("login", web::post().to(login));
+}
+
+pub fn config_auth(cfg: &mut web::ServiceConfig) {
+    cfg.route("update", web::patch().to(update));
 }

@@ -64,6 +64,11 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(redis_handle.clone()))
             .service(web::scope("/user").configure(api::user::config))
             .service(
+                web::scope("/user_auth")
+                    .wrap(jwt_auth.to_owned())
+                    .configure(api::user::config_auth),
+            )
+            .service(
                 web::scope("/ws")
                     .wrap(jwt_auth.to_owned())
                     .configure(api::websocket::config),
