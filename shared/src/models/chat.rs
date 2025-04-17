@@ -1,7 +1,7 @@
 use bson::{oid::ObjectId, DateTime};
 use serde::{Deserialize, Serialize};
 
-use super::{chat_message::ChatMessageSafe, user::UserSafe};
+use super::{chat_message::ChatMessageSafe, chat_user::ChatUserPopulated};
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct Chat {
@@ -9,7 +9,6 @@ pub struct Chat {
     pub id: Option<ObjectId>,
     pub creator: ObjectId,
     pub name: String,
-    pub user_ids: Vec<ObjectId>,
     pub first_message_ts: Option<DateTime>,
     pub last_message_ts: Option<DateTime>,
 }
@@ -20,13 +19,12 @@ pub struct ChatSafe {
     pub id: ObjectId,
     pub creator: ObjectId,
     pub name: String,
-    pub user_ids: Vec<ObjectId>,
     pub first_message_ts: DateTime,
     pub last_message_ts: DateTime,
     #[serde(default = "Vec::new")]
     pub messages: Vec<ChatMessageSafe>,
     #[serde(default = "Vec::new")]
-    pub users: Vec<UserSafe>,
+    pub users: Vec<ChatUserPopulated>,
 }
 
 impl From<Chat> for ChatSafe {
@@ -35,7 +33,6 @@ impl From<Chat> for ChatSafe {
             id: value.id.expect("converting create payloud into safe"),
             creator: value.creator,
             name: value.name,
-            user_ids: value.user_ids,
             first_message_ts: value
                 .first_message_ts
                 .expect("converting create payloud into safe"),

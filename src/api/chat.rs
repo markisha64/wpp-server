@@ -3,7 +3,7 @@ use anyhow::Context;
 use mongodb::bson::{self, doc, oid::ObjectId, DateTime};
 use std::future::IntoFuture;
 
-use futures_util::{try_join, TryStreamExt};
+use futures_util::{try_join, StreamExt, TryStreamExt};
 
 use shared::{
     api::{
@@ -14,6 +14,7 @@ use shared::{
     models::{
         chat::{Chat, ChatSafe},
         chat_message::ChatMessage,
+        chat_user::{ChatUser, ChatUserPopulated},
     },
 };
 
@@ -26,12 +27,12 @@ pub async fn create(
 ) -> anyhow::Result<ChatSafe> {
     let collection = db.database.collection::<Chat>("chats");
     let message_collection = db.database.collection::<ChatMessage>("chat_messages");
+    let chat_user_collection = db.database.collection::<ChatUser>("chat_users");
 
     let mut chat = Chat {
         id: None,
         name: request.name.clone(),
         creator: user.user.id,
-        user_ids: vec![user.user.id],
         first_message_ts: None,
         last_message_ts: None,
     };
@@ -57,6 +58,15 @@ pub async fn create(
     };
     let msg_future = message_collection.insert_one(&msg).into_future();
 
+    let chat_user_future = chat_user_collection
+        .insert_one(ChatUser {
+            id: None,
+            chat_id,
+            user_id: user.user.id,
+            last_message_seen_ts: ts,
+        })
+        .into_future();
+
     let chat_future = collection
         .update_one(
             doc! {
@@ -71,7 +81,7 @@ pub async fn create(
         )
         .into_future();
 
-    let (msg_insert, _) = try_join!(msg_future, chat_future)?;
+    let (msg_insert, _, _) = try_join!(msg_future, chat_future, chat_user_future)?;
 
     msg.id = msg_insert.inserted_id.as_object_id();
 
@@ -81,8 +91,64 @@ pub async fn create(
     let mut safe: ChatSafe = chat.into();
 
     safe.messages.push(msg.into());
+    safe.users.push(ChatUserPopulated {
+        id: user.user.id,
+        last_message_seen_ts: ts,
+        display_name: user.user.display_name.clone(),
+    });
 
     Ok(safe)
+}
+
+pub async fn get_single(
+    db: web::Data<MongoDatabase>,
+    chat_id: ObjectId,
+) -> anyhow::Result<ChatSafe> {
+    let collection = db.database.collection::<ChatSafe>("chats");
+
+    let chat = collection
+        .aggregate(vec![
+            doc! {
+                "$match": {
+                    "_id": chat_id
+                },
+            },
+            doc! {
+                "$lookup": {
+                    "from": "chat_users",
+                    "localField": "_id",
+                    "foreignField": "chat_id",
+                    "as": "users",
+                    "pipeline": vec![
+                        doc! {
+                            "$lookup": {
+                                "from": "users",
+                                "localField": "user_id",
+                                "foreignField": "_id",
+                                "as": "user"
+                            },
+                        },
+                        doc! {
+                            "$unwind": "$user"
+                        },
+                        doc! {
+                            "$project": {
+                                "_id": "$user._id",
+                                "last_message_seen_ts": 1,
+                                "display_name": "$user.display_name"
+                            }
+                        }
+                    ]
+                }
+            },
+        ])
+        .await?
+        .next()
+        .await
+        .context("chat not found")?
+        .map(|x| bson::from_bson::<ChatSafe>(bson::Bson::Document(x)))??;
+
+    Ok(chat)
 }
 
 pub async fn join(
@@ -91,16 +157,9 @@ pub async fn join(
     redis_handle: web::Data<RedisHandle>,
     chat_id: ObjectId,
 ) -> anyhow::Result<JoinResponse> {
-    let collection = db.database.collection::<ChatSafe>("chats");
+    let chat = get_single(db.clone(), chat_id).await?;
 
-    let chat = collection
-        .find_one(doc! {
-            "_id": &chat_id
-        })
-        .await?
-        .context("chat not found")?;
-
-    if chat.user_ids.contains(&user.user.id) {
+    if chat.users.iter().find(|x| x.id == user.user.id).is_some() {
         return Ok(JoinResponse {});
     }
 
@@ -121,9 +180,11 @@ pub async fn join(
         user: user.user.clone(),
     };
 
+    let user_ids = chat.users.iter().map(|x| x.id).collect();
+
     actix_web::rt::spawn(async move {
         redis_handle
-            .send_message_to_users(&chat.user_ids, notif_payload)
+            .send_message_to_users(&user_ids, notif_payload)
             .await;
     });
 
@@ -145,10 +206,35 @@ pub async fn get_chats(
             },
             doc! {
                 "$lookup": {
-                    "from": "users",
-                    "localField": "user_ids",
-                    "foreignField": "_id",
-                    "as": "users"
+                    "from": "chat_users",
+                    "localField": "_id",
+                    "foreignField": "chat_id",
+                    "as": "users",
+                    "pipeline": vec![
+                        doc! {
+                            "$match": {
+                                "user_id": user.user.id
+                            }
+                        },
+                        doc! {
+                            "$lookup": {
+                                "from": "users",
+                                "localField": "user_id",
+                                "foreignField": "_id",
+                                "as": "user"
+                            },
+                        },
+                        doc! {
+                            "$unwind": "$user"
+                        },
+                        doc! {
+                            "$project": {
+                                "_id": "$user._id",
+                                "last_message_seen_ts": 1,
+                                "display_name": "$user.display_name"
+                            }
+                        }
+                    ]
                 }
             },
             doc! {

@@ -18,6 +18,8 @@ use shared::{
     },
 };
 
+use super::chat::get_single;
+
 pub async fn create(
     db: web::Data<MongoDatabase>,
     user: &web::ReqData<Claims>,
@@ -27,16 +29,12 @@ pub async fn create(
     let chat_collection = db.database.collection::<Chat>("chats");
     let message_collection = db.database.collection::<ChatMessage>("chat_messages");
 
-    let chat = chat_collection
-        .find_one(doc! {
-            "_id": &request.chat_id
-        })
-        .await?
-        .context("chat not found")?;
+    let chat = get_single(db.clone(), request.chat_id).await?;
 
-    if !chat.user_ids.contains(&user.user.id) {
+    if chat.users.iter().find(|x| x.id == user.user.id).is_none() {
         return Err(anyhow!("chat not found"));
     }
+
     let ts = DateTime::now();
 
     let mut message = ChatMessage {
@@ -69,9 +67,11 @@ pub async fn create(
 
     let notif_payload = WebsocketServerMessage::NewMessage(message.clone().into());
 
+    let user_ids = chat.users.iter().map(|x| x.id).collect();
+
     actix_web::rt::spawn(async move {
         redis_handle
-            .send_message_to_users(&chat.user_ids, notif_payload)
+            .send_message_to_users(&user_ids, notif_payload)
             .await;
     });
 
