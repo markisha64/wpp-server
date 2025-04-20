@@ -4,7 +4,9 @@ use uuid::Uuid;
 
 use crate::{
     api::chat::JoinResponse,
-    models::{chat::ChatSafe, chat_message::ChatMessageSafe, user::UserSafe},
+    models::{
+        chat::ChatSafe, chat_message::ChatMessageSafe, chat_user::ChatUserPopulated, user::UserSafe,
+    },
 };
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -13,7 +15,7 @@ pub enum WebsocketServerMessage {
     NewMessage(ChatMessageSafe),
     UserJoined {
         chat_id: ObjectId,
-        user: UserSafe,
+        user: ChatUserPopulated,
     },
     RequestResponse {
         id: Uuid,

@@ -177,7 +177,11 @@ pub async fn join(
 
     let notif_payload = WebsocketServerMessage::UserJoined {
         chat_id: chat.id,
-        user: user.user.clone(),
+        user: ChatUserPopulated {
+            id: user.user.id,
+            last_message_seen_ts: chat.last_message_ts,
+            display_name: user.user.display_name.clone(),
+        },
     };
 
     let user_ids = chat.users.iter().map(|x| x.id).collect();
