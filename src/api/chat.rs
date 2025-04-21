@@ -119,8 +119,8 @@ pub async fn get_single(
                     "localField": "_id",
                     "foreignField": "chat_id",
                     "as": "users",
-                    "pipeline": vec![
-                        doc! {
+                    "pipeline": [
+                        {
                             "$lookup": {
                                 "from": "users",
                                 "localField": "user_id",
@@ -128,10 +128,10 @@ pub async fn get_single(
                                 "as": "user"
                             },
                         },
-                        doc! {
+                        {
                             "$unwind": "$user"
                         },
-                        doc! {
+                        {
                             "$project": {
                                 "_id": "$user._id",
                                 "last_message_seen_ts": 1,
@@ -164,15 +164,13 @@ pub async fn join(
     }
 
     db.database
-        .collection::<Chat>("chats")
-        .update_one(
-            doc! {
-                "_id": &chat_id
-            },
-            doc! {
-              "$push": { "user_ids": &user.user.id }
-            },
-        )
+        .collection::<ChatUser>("chat_users")
+        .insert_one(ChatUser {
+            id: None,
+            chat_id: chat.id,
+            user_id: user.user.id,
+            last_message_seen_ts: chat.last_message_ts,
+        })
         .await?;
 
     let notif_payload = WebsocketServerMessage::UserJoined {
@@ -204,23 +202,18 @@ pub async fn get_chats(
     let chats = collection
         .aggregate(vec![
             doc! {
-                "$match": {
-                    "user_ids": &user.user.id
-                }
-            },
-            doc! {
                 "$lookup": {
                     "from": "chat_users",
                     "localField": "_id",
                     "foreignField": "chat_id",
                     "as": "users",
-                    "pipeline": vec![
-                        doc! {
+                    "pipeline": [
+                        {
                             "$match": {
                                 "user_id": user.user.id
                             }
                         },
-                        doc! {
+                        {
                             "$lookup": {
                                 "from": "users",
                                 "localField": "user_id",
@@ -228,10 +221,10 @@ pub async fn get_chats(
                                 "as": "user"
                             },
                         },
-                        doc! {
+                        {
                             "$unwind": "$user"
                         },
-                        doc! {
+                        {
                             "$project": {
                                 "_id": "$user._id",
                                 "last_message_seen_ts": 1,
@@ -239,6 +232,15 @@ pub async fn get_chats(
                             }
                         }
                     ]
+                }
+            },
+            doc! {
+                "$match": {
+                    "users": {
+                        "$elemMatch": {
+                            "_id": user.user.id
+                        }
+                    }
                 }
             },
             doc! {

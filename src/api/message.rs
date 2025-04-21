@@ -1,7 +1,7 @@
 use std::future::IntoFuture;
 
 use actix_web::web;
-use anyhow::{anyhow, Context};
+use anyhow::anyhow;
 use futures_util::{try_join, TryStreamExt};
 use mongodb::bson::{doc, DateTime};
 
@@ -83,16 +83,12 @@ pub async fn get_messages(
     user: &web::ReqData<Claims>,
     request: GetRequest,
 ) -> anyhow::Result<Vec<ChatMessageSafe>> {
-    let chat_collection = db.database.collection::<Chat>("chats");
     let collection = db.database.collection::<ChatMessageSafe>("chat_messages");
 
-    let _ = chat_collection
-        .find_one(doc! {
-            "_id": &request.chat_id,
-            "user_ids": &user.user.id
-        })
-        .await?
-        .context("chat not found")?;
+    let chat = get_single(db.clone(), request.chat_id).await?;
+    if chat.users.iter().find(|x| x.id == user.user.id).is_none() {
+        return Err(anyhow!("chat not found"));
+    }
 
     let mut filter = doc! {
         "chat_id": &request.chat_id,
