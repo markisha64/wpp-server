@@ -1,12 +1,10 @@
-use bson::oid::ObjectId;
+use bson::{oid::ObjectId, DateTime};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
     api::chat::JoinResponse,
-    models::{
-        chat::ChatSafe, chat_message::ChatMessageSafe, chat_user::ChatUserPopulated, user::UserSafe,
-    },
+    models::{chat::ChatSafe, chat_message::ChatMessageSafe, chat_user::ChatUserPopulated},
 };
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -21,6 +19,10 @@ pub enum WebsocketServerMessage {
         id: Uuid,
         data: Result<WebsocketServerResData, String>,
     },
+    SetChatRead {
+        chat_id: ObjectId,
+        last_message_ts: DateTime,
+    },
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -30,6 +32,7 @@ pub enum WebsocketServerResData {
     CreateChat(ChatSafe),
     JoinChat(JoinResponse),
     GetChats(Vec<ChatSafe>),
+    SetChatRead(DateTime),
 
     // message routes
     NewMessage(ChatMessageSafe),
@@ -49,6 +52,7 @@ pub enum WebsocketClientMessageData {
     CreateChat(crate::api::chat::CreateRequest),
     JoinChat(ObjectId),
     GetChats,
+    SetChatRead(ObjectId),
 
     // message routes
     NewMessage(crate::api::message::CreateRequest),

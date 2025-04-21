@@ -256,3 +256,39 @@ pub async fn get_chats(
 
     Ok(chats)
 }
+
+pub async fn set_chat_read(
+    db: web::Data<MongoDatabase>,
+    user: &web::ReqData<Claims>,
+    redis_handle: web::Data<RedisHandle>,
+    chat_id: ObjectId,
+) -> anyhow::Result<DateTime> {
+    let collection = db.database.collection::<ChatUser>("chat_users");
+    let chat = get_single(db.clone(), chat_id).await?;
+
+    collection
+        .update_one(
+            doc! {
+                "chat_id": chat.id,
+                "user_id": user.user.id
+            },
+            doc! {
+                "last_message_seen_ts": chat.last_message_ts
+            },
+        )
+        .await?;
+
+    let notif_payload = WebsocketServerMessage::SetChatRead {
+        chat_id: chat.id,
+        last_message_ts: chat.last_message_ts,
+    };
+    let user_ids = vec![user.user.id];
+
+    actix_web::rt::spawn(async move {
+        redis_handle
+            .send_message_to_users(&user_ids, notif_payload)
+            .await;
+    });
+
+    Ok(chat.last_message_ts)
+}

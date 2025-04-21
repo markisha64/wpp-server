@@ -239,6 +239,15 @@ async fn request_handler(
             to_request_response(req_res, request.id)
         }
 
+        WebsocketClientMessageData::SetChatRead(id) => {
+            let req_res =
+                chat::set_chat_read(ws_server.db.clone(), &user, redis_handle.clone(), id)
+                    .await
+                    .map(|data| WebsocketServerResData::SetChatRead(data));
+
+            to_request_response(req_res, request.id)
+        }
+
         WebsocketClientMessageData::NewMessage(req_data) => {
             let req_res =
                 message::create(ws_server.db.clone(), &user, redis_handle.clone(), req_data)
