@@ -24,6 +24,7 @@ pub enum WebsocketServerMessage {
         chat_id: ObjectId,
         last_message_ts: DateTime,
     },
+    MediaSoupAck,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -38,6 +39,9 @@ pub enum WebsocketServerResData {
     // message routes
     NewMessage(ChatMessageSafe),
     GetMessages(Vec<ChatMessageSafe>),
+
+    // mediasoup
+    MediaSoupAck,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -60,6 +64,12 @@ pub enum WebsocketClientMessageData {
     GetMessages(crate::api::message::GetRequest),
 
     // mediasoup
+    MS(MediaSoup),
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "t", content = "c")]
+pub enum MediaSoup {
     RtpInit(RtpCapabilities),
     ConnectProducerTransport(DtlsParameters),
     Produce((MediaKind, RtpParameters)),

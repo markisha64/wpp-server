@@ -7,14 +7,20 @@ use std::{
 
 use actix_web::{web, HttpRequest, Responder};
 use actix_ws::{self, AggregatedMessage};
+use anyhow::anyhow;
 use futures_util::{
     future::{select, Either},
     StreamExt as _,
 };
+use mediasoup::prelude::RtpCapabilities;
 use mongodb::bson::oid::ObjectId;
 use shared::api::{
     user::Claims,
     websocket::{
+        MediaSoup::{
+            ConnectConsumerTransport, ConnectProducerTransport, Consume, ConsumerResume, Produce,
+            RtpInit,
+        },
         WebsocketClientMessage, WebsocketClientMessageData, WebsocketServerMessage,
         WebsocketServerResData,
     },
@@ -265,7 +271,9 @@ async fn request_handler(
             to_request_response(req_res, request.id)
         }
 
-        _ => {}
+        WebsocketClientMessageData::MS(_ms) => {
+            to_request_response(Err(anyhow!("Unreachable")), request.id)
+        }
     }
 }
 
@@ -280,7 +288,7 @@ async fn websocket(
 
     actix_web::rt::spawn(async move {
         let user = user.clone();
-
+        let mut client_rtp_capabilities: Option<RtpCapabilities> = Option::None;
         let user_id = user.user.id;
 
         let mut last_heartbeat = Instant::now();
@@ -305,44 +313,62 @@ async fn websocket(
 
             match select(messages, tick).await {
                 // commands & messages received from client
-                Either::Left((Either::Left((Some(Ok(msg)), _)), _)) => match msg {
-                    AggregatedMessage::Ping(bytes) => {
-                        last_heartbeat = Instant::now();
+                Either::Left((Either::Left((Some(Ok(msg)), _)), _)) => {
+                    match msg {
+                        AggregatedMessage::Ping(bytes) => {
+                            last_heartbeat = Instant::now();
 
-                        session.pong(&bytes).await.unwrap();
-                    }
+                            session.pong(&bytes).await.unwrap();
+                        }
 
-                    AggregatedMessage::Pong(_) => {
-                        last_heartbeat = Instant::now();
-                    }
+                        AggregatedMessage::Pong(_) => {
+                            last_heartbeat = Instant::now();
+                        }
 
-                    AggregatedMessage::Close(reason) => break reason,
+                        AggregatedMessage::Close(reason) => break reason,
 
-                    // TODO: modify this so we can use the mediasoup messages too
-                    AggregatedMessage::Text(payload) => {
-                        last_heartbeat = Instant::now();
+                        // TODO: modify this so we can use the mediasoup messages too
+                        AggregatedMessage::Text(payload) => {
+                            last_heartbeat = Instant::now();
 
-                        if let Ok(request) = serde_json::from_str::<WebsocketClientMessage>(
-                            payload.to_string().as_str(),
-                        ) {
-                            let res = request_handler(
-                                request,
-                                ws_server.clone(),
-                                redis_handle.clone(),
-                                &user,
-                            )
-                            .await;
+                            if let Ok(request) = serde_json::from_str::<WebsocketClientMessage>(
+                                payload.to_string().as_str(),
+                            ) {
+                                match request.data {
+                                    WebsocketClientMessageData::MS(media_soup) => {
+                                        match media_soup {
+                                            RtpInit(rtp_capabilities) => {
+                                                client_rtp_capabilities.replace(rtp_capabilities);
+                                            }
+                                            ConnectProducerTransport(dtls_parameters) => todo!(),
+                                            Produce((mediaKind, rtpParams)) => todo!(),
+                                            ConnectConsumerTransport(dtls_parameters) => todo!(),
+                                            Consume(producer_id) => todo!(),
+                                            ConsumerResume(consumer_id) => todo!(),
+                                        }
+                                    }
+                                    _ => {
+                                        let res = request_handler(
+                                            request,
+                                            ws_server.clone(),
+                                            redis_handle.clone(),
+                                            &user,
+                                        )
+                                        .await;
 
-                            if let Ok(string_payload) = serde_json::to_string(&res) {
-                                session.text(string_payload).await.unwrap();
+                                        if let Ok(string_payload) = serde_json::to_string(&res) {
+                                            session.text(string_payload).await.unwrap();
+                                        }
+                                    }
+                                }
                             }
                         }
-                    }
 
-                    AggregatedMessage::Binary(_) => {
-                        last_heartbeat = Instant::now();
+                        AggregatedMessage::Binary(_) => {
+                            last_heartbeat = Instant::now();
+                        }
                     }
-                },
+                }
 
                 // ws stream error
                 Either::Left((Either::Left((Some(Err(_err)), _)), _)) => {
