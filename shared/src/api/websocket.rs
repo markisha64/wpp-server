@@ -1,4 +1,5 @@
 use bson::{oid::ObjectId, DateTime};
+use mediasoup::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -57,4 +58,12 @@ pub enum WebsocketClientMessageData {
     // message routes
     NewMessage(crate::api::message::CreateRequest),
     GetMessages(crate::api::message::GetRequest),
+
+    // mediasoup
+    RtpInit(RtpCapabilities),
+    ConnectProducerTransport(DtlsParameters),
+    Produce((MediaKind, RtpParameters)),
+    ConnectConsumerTransport(DtlsParameters),
+    Consume(ProducerId),
+    ConsumerResume(ConsumerId),
 }

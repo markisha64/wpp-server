@@ -264,6 +264,8 @@ async fn request_handler(
 
             to_request_response(req_res, request.id)
         }
+
+        _ => {}
     }
 }
 
@@ -316,6 +318,7 @@ async fn websocket(
 
                     AggregatedMessage::Close(reason) => break reason,
 
+                    // TODO: modify this so we can use the mediasoup messages too
                     AggregatedMessage::Text(payload) => {
                         last_heartbeat = Instant::now();
 

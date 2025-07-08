@@ -21,6 +21,7 @@ uuid = "1.13.1"
 
 shared = { path = "./shared" }
 actix-cors = "0.7.0"
+mediasoup = "0.18.2"
 
 [build]
 rustflags = ["-Z", "threads=8"]
