@@ -12,7 +12,7 @@ use futures_util::{
     future::{select, Either},
     StreamExt as _,
 };
-use mediasoup::prelude::RtpCapabilities;
+use mediasoup::{prelude::RtpCapabilities, router::Router};
 use mongodb::bson::oid::ObjectId;
 use shared::api::{
     user::Claims,
@@ -37,6 +37,16 @@ use super::{
     chat::{self},
     message,
 };
+
+enum RoomCommand {}
+
+pub struct Room {
+    id: ObjectId,
+    router: Router,
+    clients: HashMap<String, mpsc::UnboundedSender<()>>,
+
+    cmd_rx: mpsc::UnboundedReceiver<RoomCommand>,
+}
 
 type ConnId = Uuid;
 
@@ -271,9 +281,7 @@ async fn request_handler(
             to_request_response(req_res, request.id)
         }
 
-        WebsocketClientMessageData::MS(_ms) => {
-            to_request_response(Err(anyhow!("Unreachable")), request.id)
-        }
+        _ => to_request_response(Err(anyhow!("Unreachable")), request.id),
     }
 }
 
@@ -288,8 +296,10 @@ async fn websocket(
 
     actix_web::rt::spawn(async move {
         let user = user.clone();
-        let mut client_rtp_capabilities: Option<RtpCapabilities> = Option::None;
         let user_id = user.user.id;
+
+        let mut client_rtp_capabilities: Option<RtpCapabilities> = Option::None;
+        let mut current_room_id: Option<ObjectId> = Option::None;
 
         let mut last_heartbeat = Instant::now();
         let mut interval = interval(HEARTBEAT_INTERVAL);
@@ -345,6 +355,28 @@ async fn websocket(
                                             ConnectConsumerTransport(dtls_parameters) => todo!(),
                                             Consume(producer_id) => todo!(),
                                             ConsumerResume(consumer_id) => todo!(),
+                                        }
+
+                                        if let Ok(string_payload) =
+                                            serde_json::to_string(&to_request_response(
+                                                Ok(WebsocketServerResData::MediaSoupAck),
+                                                request.id,
+                                            ))
+                                        {
+                                            session.text(string_payload).await.unwrap();
+                                        }
+                                    }
+                                    WebsocketClientMessageData::SetRoom(chat_id) => {
+                                        // disconnect first probs?
+                                        current_room_id.replace(chat_id);
+
+                                        if let Ok(string_payload) =
+                                            serde_json::to_string(&to_request_response(
+                                                Ok(WebsocketServerResData::MediaSoupAck),
+                                                request.id,
+                                            ))
+                                        {
+                                            session.text(string_payload).await.unwrap();
                                         }
                                     }
                                     _ => {
