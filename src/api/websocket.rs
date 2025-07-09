@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{hash_map::Entry, HashMap},
     io,
     net::{IpAddr, Ipv4Addr},
     num::{NonZeroU32, NonZeroU8},
@@ -154,48 +154,87 @@ impl WebsocketServer {
         user_id: String,
         room_id: String,
     ) -> anyhow::Result<ParticipantConnection> {
-        if self.rooms.contains_key(&room_id) {
-            let room = self.rooms.get_mut(&room_id).unwrap();
+        let entry = self.rooms.entry(room_id.clone());
 
-            room.clients.insert(user_id, Vec::new());
+        match entry {
+            Entry::Vacant(v) => {
+                let worker = self
+                    .worker_manger
+                    .create_worker({
+                        let mut settings = WorkerSettings::default();
+                        settings.log_level = WorkerLogLevel::Debug;
+                        settings.log_tags = vec![
+                            WorkerLogTag::Info,
+                            WorkerLogTag::Ice,
+                            WorkerLogTag::Dtls,
+                            WorkerLogTag::Rtp,
+                            WorkerLogTag::Srtp,
+                            WorkerLogTag::Rtcp,
+                            WorkerLogTag::Rtx,
+                            WorkerLogTag::Bwe,
+                            WorkerLogTag::Score,
+                            WorkerLogTag::Simulcast,
+                            WorkerLogTag::Svc,
+                            WorkerLogTag::Sctp,
+                            WorkerLogTag::Message,
+                        ];
 
-            let transport_options =
-                WebRtcTransportOptions::new(WebRtcTransportListenInfos::new(ListenInfo {
-                    protocol: Protocol::Udp,
-                    ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
-                    announced_address: None,
-                    port: None,
-                    port_range: None,
-                    flags: None,
-                    send_buffer_size: None,
-                    recv_buffer_size: None,
-                }));
+                        settings
+                    })
+                    .await
+                    .map_err(|error| anyhow!("Failed to create worker: {error}"))?;
+                let router = worker
+                    .create_router(RouterOptions::new(media_codecs()))
+                    .await
+                    .map_err(|error| anyhow!("Failed to create router: {error}"))?;
 
-            let producer_transport = room
-                .router
-                .create_webrtc_transport(transport_options.clone())
-                .await
-                .map_err(|error| anyhow!("Failed to create producer transport: {error}"))?;
+                v.insert(Room {
+                    id: room_id.clone(),
+                    router,
+                    clients: HashMap::new(),
+                });
+            }
+            _ => {}
+        };
 
-            let consumer_transport = room
-                .router
-                .create_webrtc_transport(transport_options)
-                .await
-                .map_err(|error| anyhow!("Failed to create consumer transport: {error}"))?;
+        let room = self.rooms.get_mut(&room_id).unwrap();
 
-            return Ok(ParticipantConnection {
-                id: Uuid::new_v4(),
-                client_rtp_capabilities: None,
-                consumers: HashMap::new(),
-                producers: Vec::new(),
-                transports: Transports {
-                    consumer: consumer_transport,
-                    producer: producer_transport,
-                },
-            });
-        }
+        room.clients.insert(user_id, Vec::new());
 
-        Err(anyhow!(""))
+        let transport_options =
+            WebRtcTransportOptions::new(WebRtcTransportListenInfos::new(ListenInfo {
+                protocol: Protocol::Udp,
+                ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
+                announced_address: None,
+                port: None,
+                port_range: None,
+                flags: None,
+                send_buffer_size: None,
+                recv_buffer_size: None,
+            }));
+
+        let producer_transport = room
+            .router
+            .create_webrtc_transport(transport_options.clone())
+            .await
+            .map_err(|error| anyhow!("Failed to create producer transport: {error}"))?;
+
+        let consumer_transport = room
+            .router
+            .create_webrtc_transport(transport_options)
+            .await
+            .map_err(|error| anyhow!("Failed to create consumer transport: {error}"))?;
+
+        Ok(ParticipantConnection {
+            id: Uuid::new_v4(),
+            client_rtp_capabilities: None,
+            consumers: HashMap::new(),
+            producers: Vec::new(),
+            transports: Transports {
+                consumer: consumer_transport,
+                producer: producer_transport,
+            },
+        })
     }
 
     pub async fn run(mut self) -> io::Result<()> {
