@@ -1,6 +1,8 @@
 use std::{
     collections::HashMap,
     io,
+    net::{IpAddr, Ipv4Addr},
+    num::{NonZeroU32, NonZeroU8},
     pin::pin,
     time::{Duration, Instant},
 };
@@ -54,13 +56,12 @@ struct ParticipantConnection {
     consumers: HashMap<ConsumerId, Consumer>,
     producers: Vec<Producer>,
     transports: Transports,
-    room: Room,
 }
 
 pub struct Room {
     id: String,
     router: Router,
-    clients: HashMap<String, mpsc::UnboundedSender<()>>,
+    clients: HashMap<String, Vec<Producer>>,
 }
 
 enum Command {
@@ -153,7 +154,48 @@ impl WebsocketServer {
         user_id: String,
         room_id: String,
     ) -> anyhow::Result<ParticipantConnection> {
-        return Err(anyhow!(""));
+        if self.rooms.contains_key(&room_id) {
+            let room = self.rooms.get_mut(&room_id).unwrap();
+
+            room.clients.insert(user_id, Vec::new());
+
+            let transport_options =
+                WebRtcTransportOptions::new(WebRtcTransportListenInfos::new(ListenInfo {
+                    protocol: Protocol::Udp,
+                    ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
+                    announced_address: None,
+                    port: None,
+                    port_range: None,
+                    flags: None,
+                    send_buffer_size: None,
+                    recv_buffer_size: None,
+                }));
+
+            let producer_transport = room
+                .router
+                .create_webrtc_transport(transport_options.clone())
+                .await
+                .map_err(|error| anyhow!("Failed to create producer transport: {error}"))?;
+
+            let consumer_transport = room
+                .router
+                .create_webrtc_transport(transport_options)
+                .await
+                .map_err(|error| anyhow!("Failed to create consumer transport: {error}"))?;
+
+            return Ok(ParticipantConnection {
+                id: Uuid::new_v4(),
+                client_rtp_capabilities: None,
+                consumers: HashMap::new(),
+                producers: Vec::new(),
+                transports: Transports {
+                    consumer: consumer_transport,
+                    producer: producer_transport,
+                },
+            });
+        }
+
+        Err(anyhow!(""))
     }
 
     pub async fn run(mut self) -> io::Result<()> {
@@ -251,6 +293,20 @@ impl WebsocketSeverHandle {
             self.send_message(user_id.to_string(), msg.clone()).await;
         }
     }
+
+    pub async fn join_room(&self, user_id: String, room_id: String) -> ParticipantConnection {
+        let (res_tx, res_rx) = oneshot::channel();
+
+        self.cmd_tx
+            .send(Command::JoinRoom {
+                user_id,
+                room_id,
+                res_tx,
+            })
+            .unwrap();
+
+        res_rx.await.unwrap().unwrap()
+    }
 }
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
@@ -344,6 +400,7 @@ async fn websocket(
 
         let mut client_rtp_capabilities: Option<RtpCapabilities> = Option::None;
         let mut current_room_id: Option<ObjectId> = Option::None;
+        let mut participant_connection: Option<ParticipantConnection> = Option::None;
 
         let mut last_heartbeat = Instant::now();
         let mut interval = interval(HEARTBEAT_INTERVAL);
@@ -390,29 +447,57 @@ async fn websocket(
                             ) {
                                 match request.data {
                                     WebsocketClientMessageData::MS(media_soup) => {
-                                        match media_soup {
+                                        let r = match media_soup {
                                             RtpInit(rtp_capabilities) => {
-                                                client_rtp_capabilities.replace(rtp_capabilities);
+                                                match participant_connection.as_mut() {
+                                                    Some(conn) => {
+                                                        conn.client_rtp_capabilities
+                                                            .replace(rtp_capabilities);
+                                                        Ok(WebsocketServerResData::MediaSoupAck)
+                                                    }
+                                                    None => Err(anyhow!("missing p conn")),
+                                                }
                                             }
-                                            ConnectProducerTransport(dtls_parameters) => todo!(),
+                                            ConnectProducerTransport(dtls_parameters) => {
+                                                match &participant_connection {
+                                                    Some(conn) => {
+                                                        let transport =
+                                                            conn.transports.producer.clone();
+
+                                                        transport
+                                                            .connect(
+                                                                WebRtcTransportRemoteParameters {
+                                                                    dtls_parameters,
+                                                                },
+                                                            )
+                                                            .await
+                                                            .and_then(|_| {
+                                                                Ok(WebsocketServerResData::MediaSoupAck)
+                                                            })
+                                                            .map_err(|err| anyhow!(err))
+                                                    }
+                                                    None => Err(anyhow!("missing p conn")),
+                                                }
+                                            }
                                             Produce((mediaKind, rtpParams)) => todo!(),
                                             ConnectConsumerTransport(dtls_parameters) => todo!(),
                                             Consume(producer_id) => todo!(),
                                             ConsumerResume(consumer_id) => todo!(),
-                                        }
+                                        };
 
-                                        if let Ok(string_payload) =
-                                            serde_json::to_string(&to_request_response(
-                                                Ok(WebsocketServerResData::MediaSoupAck),
-                                                request.id,
-                                            ))
-                                        {
+                                        if let Ok(string_payload) = serde_json::to_string(
+                                            &to_request_response(r, request.id),
+                                        ) {
                                             session.text(string_payload).await.unwrap();
                                         }
                                     }
                                     WebsocketClientMessageData::SetRoom(chat_id) => {
                                         // disconnect first probs?
                                         current_room_id.replace(chat_id);
+                                        let a = ws_server
+                                            .join_room(user_id.to_string(), chat_id.to_string())
+                                            .await;
+                                        participant_connection.replace(a);
 
                                         if let Ok(string_payload) =
                                             serde_json::to_string(&to_request_response(
@@ -484,4 +569,30 @@ async fn websocket(
 
 pub fn config(cfg: &mut web::ServiceConfig) {
     cfg.route("/", web::get().to(websocket));
+}
+
+fn media_codecs() -> Vec<RtpCodecCapability> {
+    vec![
+        RtpCodecCapability::Audio {
+            mime_type: MimeTypeAudio::Opus,
+            preferred_payload_type: None,
+            clock_rate: NonZeroU32::new(48000).unwrap(),
+            channels: NonZeroU8::new(2).unwrap(),
+            parameters: RtpCodecParametersParameters::from([("useinbandfec", 1_u32.into())]),
+            rtcp_feedback: vec![RtcpFeedback::TransportCc],
+        },
+        RtpCodecCapability::Video {
+            mime_type: MimeTypeVideo::Vp8,
+            preferred_payload_type: None,
+            clock_rate: NonZeroU32::new(90000).unwrap(),
+            parameters: RtpCodecParametersParameters::default(),
+            rtcp_feedback: vec![
+                RtcpFeedback::Nack,
+                RtcpFeedback::NackPli,
+                RtcpFeedback::CcmFir,
+                RtcpFeedback::GoogRemb,
+                RtcpFeedback::TransportCc,
+            ],
+        },
+    ]
 }
