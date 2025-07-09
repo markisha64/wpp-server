@@ -12,7 +12,10 @@ use futures_util::{
     future::{select, Either},
     StreamExt as _,
 };
-use mediasoup::{prelude::RtpCapabilities, router::Router};
+use mediasoup::{
+    prelude::*,
+    worker::{WorkerLogLevel, WorkerLogTag},
+};
 use mongodb::bson::oid::ObjectId;
 use shared::api::{
     user::Claims,
@@ -38,17 +41,27 @@ use super::{
     message,
 };
 
-enum RoomCommand {}
+type ConnId = Uuid;
 
-pub struct Room {
-    id: ObjectId,
-    router: Router,
-    clients: HashMap<String, mpsc::UnboundedSender<()>>,
-
-    cmd_rx: mpsc::UnboundedReceiver<RoomCommand>,
+struct Transports {
+    consumer: WebRtcTransport,
+    producer: WebRtcTransport,
 }
 
-type ConnId = Uuid;
+struct ParticipantConnection {
+    id: ConnId,
+    client_rtp_capabilities: Option<RtpCapabilities>,
+    consumers: HashMap<ConsumerId, Consumer>,
+    producers: Vec<Producer>,
+    transports: Transports,
+    room: Room,
+}
+
+pub struct Room {
+    id: String,
+    router: Router,
+    clients: HashMap<String, mpsc::UnboundedSender<()>>,
+}
 
 enum Command {
     Connect {
@@ -67,25 +80,39 @@ enum Command {
         user_id: String,
         res_tx: oneshot::Sender<()>,
     },
+
+    JoinRoom {
+        user_id: String,
+        room_id: String,
+        res_tx: oneshot::Sender<anyhow::Result<ParticipantConnection>>,
+    },
 }
 
 pub struct WebsocketServer {
     connections: HashMap<String, HashMap<Uuid, mpsc::UnboundedSender<WebsocketServerMessage>>>,
+    rooms: HashMap<String, Room>,
 
     cmd_rx: mpsc::UnboundedReceiver<Command>,
+
+    worker_manger: web::Data<WorkerManager>,
 
     #[allow(dead_code)]
     db: web::Data<MongoDatabase>,
 }
 
 impl WebsocketServer {
-    pub fn new(db: web::Data<MongoDatabase>) -> (Self, WebsocketSeverHandle) {
+    pub fn new(
+        db: web::Data<MongoDatabase>,
+        worker_manager: web::Data<WorkerManager>,
+    ) -> (Self, WebsocketSeverHandle) {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
 
         (
             Self {
                 connections: HashMap::new(),
                 cmd_rx,
+                rooms: HashMap::new(),
+                worker_manger: worker_manager.clone(),
                 db: db.clone(),
             },
             WebsocketSeverHandle { cmd_tx, db },
@@ -121,6 +148,14 @@ impl WebsocketServer {
         }
     }
 
+    async fn join_room(
+        &mut self,
+        user_id: String,
+        room_id: String,
+    ) -> anyhow::Result<ParticipantConnection> {
+        return Err(anyhow!(""));
+    }
+
     pub async fn run(mut self) -> io::Result<()> {
         while let Some(cmd) = self.cmd_rx.recv().await {
             match cmd {
@@ -144,6 +179,15 @@ impl WebsocketServer {
                 } => {
                     self.send_message(user_id, msg).await;
                     let _ = res_tx.send(());
+                }
+
+                Command::JoinRoom {
+                    user_id,
+                    room_id,
+                    res_tx,
+                } => {
+                    let connection = self.join_room(user_id, room_id).await;
+                    let _ = res_tx.send(connection);
                 }
             }
         }

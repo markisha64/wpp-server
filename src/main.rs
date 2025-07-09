@@ -2,6 +2,7 @@ use actix_cors::Cors;
 use api::websocket::WebsocketServer;
 use dotenv::dotenv;
 use jwt::{JwtAuth, JwtSignService};
+use mediasoup::prelude::WorkerManager;
 use mongodb::MongoDatabase;
 use redis::RedisHandler;
 use shared::api::user::Claims;
@@ -19,6 +20,8 @@ mod redis;
 async fn main() -> std::io::Result<()> {
     dotenv().ok();
 
+    let worker_manager = web::Data::new(WorkerManager::new());
+
     let mongo_database = MongoDatabase::init()
         .await
         .expect("Failed to initialize MongoDB client");
@@ -27,7 +30,8 @@ async fn main() -> std::io::Result<()> {
 
     let jwt_auth = JwtAuth::<Claims>::init().expect("failed to auth init");
 
-    let (ws_server, server_tx) = WebsocketServer::new(mongo_database.to_owned());
+    let (ws_server, server_tx) =
+        WebsocketServer::new(mongo_database.to_owned(), worker_manager.to_owned());
 
     let ws_handle = web::Data::new(server_tx);
 
@@ -58,6 +62,7 @@ async fn main() -> std::io::Result<()> {
 
         App::new()
             .wrap(cors)
+            .app_data(worker_manager.to_owned())
             .app_data(mongo_database.to_owned())
             .app_data(jwt_service.to_owned())
             .app_data(ws_handle.clone())
