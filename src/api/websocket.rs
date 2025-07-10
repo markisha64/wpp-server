@@ -9,7 +9,7 @@ use std::{
 
 use actix_web::{web, HttpRequest, Responder};
 use actix_ws::{self, AggregatedMessage};
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use futures_util::{
     future::{select, Either},
     StreamExt as _,
@@ -86,6 +86,13 @@ enum Command {
         user_id: String,
         room_id: String,
         res_tx: oneshot::Sender<anyhow::Result<ParticipantConnection>>,
+    },
+
+    Produce {
+        user_id: String,
+        room_id: String,
+        producer: Producer,
+        res_tx: oneshot::Sender<anyhow::Result<()>>,
     },
 }
 
@@ -237,6 +244,21 @@ impl WebsocketServer {
         })
     }
 
+    pub fn produce(
+        &mut self,
+        user_id: String,
+        room_id: String,
+        producer: Producer,
+    ) -> anyhow::Result<()> {
+        let room = self.rooms.get_mut(&room_id).context("missing room")?;
+
+        let producers = room.clients.get_mut(&user_id).context("missing user")?;
+
+        producers.push(producer);
+
+        Ok(())
+    }
+
     pub async fn run(mut self) -> io::Result<()> {
         while let Some(cmd) = self.cmd_rx.recv().await {
             match cmd {
@@ -269,6 +291,16 @@ impl WebsocketServer {
                 } => {
                     let connection = self.join_room(user_id, room_id).await;
                     let _ = res_tx.send(connection);
+                }
+
+                Command::Produce {
+                    user_id,
+                    room_id,
+                    producer,
+                    res_tx,
+                } => {
+                    let res = self.produce(user_id, room_id, producer);
+                    let _ = res_tx.send(res);
                 }
             }
         }
@@ -345,6 +377,26 @@ impl WebsocketSeverHandle {
             .unwrap();
 
         res_rx.await.unwrap().unwrap()
+    }
+
+    pub async fn produce(
+        &self,
+        user_id: String,
+        room_id: String,
+        producer: Producer,
+    ) -> anyhow::Result<()> {
+        let (res_tx, res_rx) = oneshot::channel();
+
+        self.cmd_tx
+            .send(Command::Produce {
+                user_id,
+                room_id,
+                producer,
+                res_tx,
+            })
+            .unwrap();
+
+        res_rx.await.unwrap()
     }
 }
 
@@ -518,8 +570,37 @@ async fn websocket(
                                                     None => Err(anyhow!("missing p conn")),
                                                 }
                                             }
-                                            Produce((mediaKind, rtpParams)) => todo!(),
-                                            ConnectConsumerTransport(dtls_parameters) => todo!(),
+                                            Produce((media_kind, rtp_params)) => {
+                                                match participant_connection.as_mut() {
+                                                    Some(conn) => {
+                                                        let transport =
+                                                            conn.transports.producer.clone();
+
+                                                        let producer = transport
+                                                            .produce(ProducerOptions::new(
+                                                                media_kind, rtp_params,
+                                                            ))
+                                                            .await;
+
+                                                        let producer = producer.unwrap();
+
+                                                        conn.producers.push(producer.clone());
+
+                                                        ws_server
+                                                            .produce(
+                                                                user_id.to_string(),
+                                                                conn.id.to_string(),
+                                                                producer,
+                                                            )
+                                                            .await
+                                                            .map(|_| {
+                                                                WebsocketServerResData::MediaSoupAck
+                                                            })
+                                                    }
+                                                    None => Err(anyhow!("missing p conn")),
+                                                }
+                                            }
+                                            ConnectConsumerTransport(dtls_parameters) => {}
                                             Consume(producer_id) => todo!(),
                                             ConsumerResume(consumer_id) => todo!(),
                                         };
