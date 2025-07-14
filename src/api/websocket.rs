@@ -558,8 +558,40 @@ async fn websocket(
                             .map(|_| WebsocketServerResData::MediaSoupAck)
                             .map_err(|err| anyhow!(err))
                     }
-                    Consume(producer_id) => todo!(),
-                    ConsumerResume(consumer_id) => todo!(),
+                    Consume(producer_id) => {
+                        let conn = participant_connection.as_mut().context("missing p conn")?;
+
+                        let rtp_capabilities = conn
+                            .client_rtp_capabilities
+                            .clone()
+                            .context("missing rtp capabilities")?;
+
+                        let mut options = ConsumerOptions::new(producer_id, rtp_capabilities);
+                        options.paused = true;
+
+                        let consumer = conn.transports.consumer.clone().consume(options).await?;
+
+                        let id = consumer.id();
+                        let kind = consumer.kind();
+                        let rtp_parameters = consumer.rtp_parameters().clone();
+
+                        conn.consumers.insert(id, consumer);
+
+                        // TODO: some of these actually send data back
+                        Ok(WebsocketServerResData::MediaSoupAck)
+                    }
+                    ConsumerResume(consumer_id) => {
+                        let conn = participant_connection.as_ref().context("missing p conn")?;
+
+                        conn.consumers
+                            .get(&consumer_id)
+                            .cloned()
+                            .context("missing consumer")?
+                            .resume()
+                            .await
+                            .map(|_| WebsocketServerResData::MediaSoupAck)
+                            .map_err(|err| anyhow!(err))
+                    }
                     SetRoom(chat_id) => {
                         // disconnect first probs?
                         current_room_id.replace(chat_id);
