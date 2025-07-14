@@ -26,8 +26,8 @@ use shared::api::{
             self, ConnectConsumerTransport, ConnectProducerTransport, Consume, ConsumerResume,
             Produce, RtpInit, SetRoom,
         },
-        WebsocketClientMessage, WebsocketClientMessageData, WebsocketServerMessage,
-        WebsocketServerResData,
+        TransportOptions, WebsocketClientMessage, WebsocketClientMessageData,
+        WebsocketServerMessage, WebsocketServerResData,
     },
 };
 use uuid::Uuid;
@@ -85,7 +85,7 @@ enum Command {
     JoinRoom {
         user_id: String,
         room_id: String,
-        res_tx: oneshot::Sender<anyhow::Result<ParticipantConnection>>,
+        res_tx: oneshot::Sender<anyhow::Result<(ParticipantConnection, RtpCapabilitiesFinalized)>>,
     },
 
     Produce {
@@ -160,7 +160,7 @@ impl WebsocketServer {
         &mut self,
         user_id: String,
         room_id: String,
-    ) -> anyhow::Result<ParticipantConnection> {
+    ) -> anyhow::Result<(ParticipantConnection, RtpCapabilitiesFinalized)> {
         let entry = self.rooms.entry(room_id.clone());
 
         match entry {
@@ -232,16 +232,19 @@ impl WebsocketServer {
             .await
             .map_err(|error| anyhow!("Failed to create consumer transport: {error}"))?;
 
-        Ok(ParticipantConnection {
-            id: Uuid::new_v4(),
-            client_rtp_capabilities: None,
-            consumers: HashMap::new(),
-            producers: Vec::new(),
-            transports: Transports {
-                consumer: consumer_transport,
-                producer: producer_transport,
+        Ok((
+            ParticipantConnection {
+                id: Uuid::new_v4(),
+                client_rtp_capabilities: None,
+                consumers: HashMap::new(),
+                producers: Vec::new(),
+                transports: Transports {
+                    consumer: consumer_transport,
+                    producer: producer_transport,
+                },
             },
-        })
+            room.router.rtp_capabilities().clone(),
+        ))
     }
 
     pub fn produce(
@@ -365,7 +368,11 @@ impl WebsocketSeverHandle {
         }
     }
 
-    pub async fn join_room(&self, user_id: String, room_id: String) -> ParticipantConnection {
+    pub async fn join_room(
+        &self,
+        user_id: String,
+        room_id: String,
+    ) -> (ParticipantConnection, RtpCapabilitiesFinalized) {
         let (res_tx, res_rx) = oneshot::channel();
 
         self.cmd_tx
@@ -600,12 +607,33 @@ async fn websocket(
                     SetRoom(chat_id) => {
                         // disconnect first probs?
                         current_room_id.replace(chat_id);
-                        let a = ws_server
+                        let (a, router_rtp_capabilities) = ws_server
                             .join_room(user_id.to_string(), chat_id.to_string())
                             .await;
+
+                        let consumer = &a.transports.consumer;
+                        let producer = &a.transports.producer;
+
+                        let r = WebsocketServerResData::SetRoom {
+                            room_id: chat_id.to_string(),
+                            consumer_transport_options: TransportOptions {
+                                id: consumer.id(),
+                                dtls_parameters: consumer.dtls_parameters(),
+                                ice_candidates: consumer.ice_candidates().clone(),
+                                ice_parameters: consumer.ice_parameters().clone(),
+                            },
+                            producer_transport_options: TransportOptions {
+                                id: producer.id(),
+                                dtls_parameters: producer.dtls_parameters(),
+                                ice_candidates: producer.ice_candidates().clone(),
+                                ice_parameters: producer.ice_parameters().clone(),
+                            },
+                            router_rtp_capabilities,
+                        };
+
                         participant_connection.replace(a);
 
-                        Ok(WebsocketServerResData::SetRoom)
+                        Ok(r)
                     }
                 }
             };

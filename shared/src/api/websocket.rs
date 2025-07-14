@@ -8,6 +8,14 @@ use crate::{
     models::{chat::ChatSafe, chat_message::ChatMessageSafe, chat_user::ChatUserPopulated},
 };
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct TransportOptions {
+    pub id: TransportId,
+    pub dtls_parameters: DtlsParameters,
+    pub ice_candidates: Vec<IceCandidate>,
+    pub ice_parameters: IceParameters,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "t", content = "c")]
 pub enum WebsocketServerMessage {
@@ -40,7 +48,12 @@ pub enum WebsocketServerResData {
     GetMessages(Vec<ChatMessageSafe>),
 
     // mediasoup
-    SetRoom,
+    SetRoom {
+        room_id: String,
+        consumer_transport_options: TransportOptions,
+        producer_transport_options: TransportOptions,
+        router_rtp_capabilities: RtpCapabilitiesFinalized,
+    },
     RtpInit,
     ConnectProducerTransport,
     Produce(ProducerId),
