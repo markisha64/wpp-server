@@ -576,7 +576,6 @@ async fn websocket(
 
                         conn.consumers.insert(id, consumer);
 
-                        // TODO: some of these actually send data back
                         Ok(WebsocketServerResData::Consume {
                             id,
                             producer_id,
@@ -587,14 +586,16 @@ async fn websocket(
                     ConsumerResume(consumer_id) => {
                         let conn = participant_connection.as_ref().context("missing p conn")?;
 
-                        conn.consumers
+                        // we ignore error here
+                        let _ = conn
+                            .consumers
                             .get(&consumer_id)
                             .cloned()
                             .context("missing consumer")?
                             .resume()
-                            .await
-                            .map(|_| WebsocketServerResData::ConsumerResume)
-                            .map_err(|err| anyhow!(err))
+                            .await;
+
+                        Ok(WebsocketServerResData::ConsumerResume)
                     }
                     SetRoom(chat_id) => {
                         // disconnect first probs?
@@ -617,58 +618,55 @@ async fn websocket(
 
             match select(messages, tick).await {
                 // commands & messages received from client
-                Either::Left((Either::Left((Some(Ok(msg)), _)), _)) => {
-                    match msg {
-                        AggregatedMessage::Ping(bytes) => {
-                            last_heartbeat = Instant::now();
+                Either::Left((Either::Left((Some(Ok(msg)), _)), _)) => match msg {
+                    AggregatedMessage::Ping(bytes) => {
+                        last_heartbeat = Instant::now();
 
-                            session.pong(&bytes).await.unwrap();
-                        }
+                        session.pong(&bytes).await.unwrap();
+                    }
 
-                        AggregatedMessage::Pong(_) => {
-                            last_heartbeat = Instant::now();
-                        }
+                    AggregatedMessage::Pong(_) => {
+                        last_heartbeat = Instant::now();
+                    }
 
-                        AggregatedMessage::Close(reason) => break reason,
+                    AggregatedMessage::Close(reason) => break reason,
 
-                        // TODO: modify this so we can use the mediasoup messages too
-                        AggregatedMessage::Text(payload) => {
-                            last_heartbeat = Instant::now();
+                    AggregatedMessage::Text(payload) => {
+                        last_heartbeat = Instant::now();
 
-                            if let Ok(request) = serde_json::from_str::<WebsocketClientMessage>(
-                                payload.to_string().as_str(),
-                            ) {
-                                match request.data {
-                                    WebsocketClientMessageData::MS(media_soup) => {
-                                        let r = ms_handler(media_soup).await;
-                                        if let Ok(string_payload) = serde_json::to_string(
-                                            &to_request_response(r, request.id),
-                                        ) {
-                                            session.text(string_payload).await.unwrap();
-                                        }
+                        if let Ok(request) = serde_json::from_str::<WebsocketClientMessage>(
+                            payload.to_string().as_str(),
+                        ) {
+                            match request.data {
+                                WebsocketClientMessageData::MS(media_soup) => {
+                                    let r = ms_handler(media_soup).await;
+                                    if let Ok(string_payload) =
+                                        serde_json::to_string(&to_request_response(r, request.id))
+                                    {
+                                        session.text(string_payload).await.unwrap();
                                     }
-                                    _ => {
-                                        let res = request_handler(
-                                            request,
-                                            ws_server.clone(),
-                                            redis_handle.clone(),
-                                            &user,
-                                        )
-                                        .await;
+                                }
+                                _ => {
+                                    let res = request_handler(
+                                        request,
+                                        ws_server.clone(),
+                                        redis_handle.clone(),
+                                        &user,
+                                    )
+                                    .await;
 
-                                        if let Ok(string_payload) = serde_json::to_string(&res) {
-                                            session.text(string_payload).await.unwrap();
-                                        }
+                                    if let Ok(string_payload) = serde_json::to_string(&res) {
+                                        session.text(string_payload).await.unwrap();
                                     }
                                 }
                             }
                         }
-
-                        AggregatedMessage::Binary(_) => {
-                            last_heartbeat = Instant::now();
-                        }
                     }
-                }
+
+                    AggregatedMessage::Binary(_) => {
+                        last_heartbeat = Instant::now();
+                    }
+                },
 
                 // ws stream error
                 Either::Left((Either::Left((Some(Err(_err)), _)), _)) => {
