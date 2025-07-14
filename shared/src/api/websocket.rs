@@ -24,7 +24,6 @@ pub enum WebsocketServerMessage {
         chat_id: ObjectId,
         last_message_ts: DateTime,
     },
-    MediaSoupAck,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -41,7 +40,18 @@ pub enum WebsocketServerResData {
     GetMessages(Vec<ChatMessageSafe>),
 
     // mediasoup
-    MediaSoupAck,
+    SetRoom,
+    RtpInit,
+    ConnectProducerTransport,
+    Produce(ProducerId),
+    ConnectConsumerTransport,
+    Consume {
+        id: ConsumerId,
+        producer_id: ProducerId,
+        kind: MediaKind,
+        rtp_parameters: RtpParameters,
+    },
+    ConsumerResume,
 }
 
 #[derive(Serialize, Deserialize)]

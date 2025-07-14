@@ -16,7 +16,6 @@ use futures_util::{
 };
 use mediasoup::{
     prelude::*,
-    rtp_parameters,
     worker::{WorkerLogLevel, WorkerLogTag},
 };
 use mongodb::bson::oid::ObjectId;
@@ -46,17 +45,17 @@ use super::{
 
 type ConnId = Uuid;
 
-struct Transports {
+pub struct Transports {
     consumer: WebRtcTransport,
     producer: WebRtcTransport,
 }
 
-struct ParticipantConnection {
-    id: ConnId,
-    client_rtp_capabilities: Option<RtpCapabilities>,
-    consumers: HashMap<ConsumerId, Consumer>,
-    producers: Vec<Producer>,
-    transports: Transports,
+pub struct ParticipantConnection {
+    pub id: ConnId,
+    pub client_rtp_capabilities: Option<RtpCapabilities>,
+    pub consumers: HashMap<ConsumerId, Consumer>,
+    pub producers: Vec<Producer>,
+    pub transports: Transports,
 }
 
 pub struct Room {
@@ -490,7 +489,6 @@ async fn websocket(
         let user = user.clone();
         let user_id = user.user.id;
 
-        let mut client_rtp_capabilities: Option<RtpCapabilities> = Option::None;
         let mut current_room_id: Option<ObjectId> = Option::None;
         let mut participant_connection: Option<ParticipantConnection> = Option::None;
 
@@ -516,7 +514,7 @@ async fn websocket(
 
                         conn.client_rtp_capabilities.replace(rtp_capabilities);
 
-                        Ok(WebsocketServerResData::MediaSoupAck)
+                        Ok(WebsocketServerResData::RtpInit)
                     }
                     ConnectProducerTransport(dtls_parameters) => {
                         let conn = participant_connection.as_ref().context("missing p conn")?;
@@ -526,7 +524,7 @@ async fn websocket(
                         transport
                             .connect(WebRtcTransportRemoteParameters { dtls_parameters })
                             .await
-                            .and_then(|_| Ok(WebsocketServerResData::MediaSoupAck))
+                            .and_then(|_| Ok(WebsocketServerResData::ConnectProducerTransport))
                             .map_err(|err| anyhow!(err))
                     }
                     Produce((media_kind, rtp_params)) => {
@@ -539,13 +537,14 @@ async fn websocket(
                             .await;
 
                         let producer = producer?;
+                        let id = producer.id();
 
                         conn.producers.push(producer.clone());
 
                         ws_server
                             .produce(user_id.to_string(), conn.id.to_string(), producer)
                             .await
-                            .map(|_| WebsocketServerResData::MediaSoupAck)
+                            .map(|_| WebsocketServerResData::Produce(id))
                     }
                     ConnectConsumerTransport(dtls_parameters) => {
                         let conn = participant_connection.as_ref().context("missing p conn")?;
@@ -555,7 +554,7 @@ async fn websocket(
                             .clone()
                             .connect(WebRtcTransportRemoteParameters { dtls_parameters })
                             .await
-                            .map(|_| WebsocketServerResData::MediaSoupAck)
+                            .map(|_| WebsocketServerResData::ConnectProducerTransport)
                             .map_err(|err| anyhow!(err))
                     }
                     Consume(producer_id) => {
@@ -578,7 +577,12 @@ async fn websocket(
                         conn.consumers.insert(id, consumer);
 
                         // TODO: some of these actually send data back
-                        Ok(WebsocketServerResData::MediaSoupAck)
+                        Ok(WebsocketServerResData::Consume {
+                            id,
+                            producer_id,
+                            kind,
+                            rtp_parameters,
+                        })
                     }
                     ConsumerResume(consumer_id) => {
                         let conn = participant_connection.as_ref().context("missing p conn")?;
@@ -589,7 +593,7 @@ async fn websocket(
                             .context("missing consumer")?
                             .resume()
                             .await
-                            .map(|_| WebsocketServerResData::MediaSoupAck)
+                            .map(|_| WebsocketServerResData::ConsumerResume)
                             .map_err(|err| anyhow!(err))
                     }
                     SetRoom(chat_id) => {
@@ -600,7 +604,7 @@ async fn websocket(
                             .await;
                         participant_connection.replace(a);
 
-                        Ok(WebsocketServerResData::MediaSoupAck)
+                        Ok(WebsocketServerResData::SetRoom)
                     }
                 }
             };
