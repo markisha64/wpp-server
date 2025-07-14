@@ -16,6 +16,7 @@ use futures_util::{
 };
 use mediasoup::{
     prelude::*,
+    rtp_parameters,
     worker::{WorkerLogLevel, WorkerLogTag},
 };
 use mongodb::bson::oid::ObjectId;
@@ -23,8 +24,8 @@ use shared::api::{
     user::Claims,
     websocket::{
         MediaSoup::{
-            ConnectConsumerTransport, ConnectProducerTransport, Consume, ConsumerResume, Produce,
-            RtpInit,
+            self, ConnectConsumerTransport, ConnectProducerTransport, Consume, ConsumerResume,
+            Produce, RtpInit, SetRoom,
         },
         WebsocketClientMessage, WebsocketClientMessageData, WebsocketServerMessage,
         WebsocketServerResData,
@@ -507,6 +508,71 @@ async fn websocket(
 
         let mut msg_stream = pin!(msg_stream_f);
 
+        let mut ms_handler =
+            async |media_soup: MediaSoup| -> anyhow::Result<WebsocketServerResData> {
+                match media_soup {
+                    RtpInit(rtp_capabilities) => {
+                        let conn = participant_connection.as_mut().context("missing p conn")?;
+
+                        conn.client_rtp_capabilities.replace(rtp_capabilities);
+
+                        Ok(WebsocketServerResData::MediaSoupAck)
+                    }
+                    ConnectProducerTransport(dtls_parameters) => {
+                        let conn = participant_connection.as_ref().context("missing p conn")?;
+
+                        let transport = conn.transports.producer.clone();
+
+                        transport
+                            .connect(WebRtcTransportRemoteParameters { dtls_parameters })
+                            .await
+                            .and_then(|_| Ok(WebsocketServerResData::MediaSoupAck))
+                            .map_err(|err| anyhow!(err))
+                    }
+                    Produce((media_kind, rtp_params)) => {
+                        let conn = participant_connection.as_mut().context("missing p conn")?;
+
+                        let transport = conn.transports.producer.clone();
+
+                        let producer = transport
+                            .produce(ProducerOptions::new(media_kind, rtp_params))
+                            .await;
+
+                        let producer = producer?;
+
+                        conn.producers.push(producer.clone());
+
+                        ws_server
+                            .produce(user_id.to_string(), conn.id.to_string(), producer)
+                            .await
+                            .map(|_| WebsocketServerResData::MediaSoupAck)
+                    }
+                    ConnectConsumerTransport(dtls_parameters) => {
+                        let conn = participant_connection.as_ref().context("missing p conn")?;
+
+                        conn.transports
+                            .consumer
+                            .clone()
+                            .connect(WebRtcTransportRemoteParameters { dtls_parameters })
+                            .await
+                            .map(|_| WebsocketServerResData::MediaSoupAck)
+                            .map_err(|err| anyhow!(err))
+                    }
+                    Consume(producer_id) => todo!(),
+                    ConsumerResume(consumer_id) => todo!(),
+                    SetRoom(chat_id) => {
+                        // disconnect first probs?
+                        current_room_id.replace(chat_id);
+                        let a = ws_server
+                            .join_room(user_id.to_string(), chat_id.to_string())
+                            .await;
+                        participant_connection.replace(a);
+
+                        Ok(WebsocketServerResData::MediaSoupAck)
+                    }
+                }
+            };
+
         let close_reason = loop {
             let tick = pin!(interval.tick());
             let msg_rx = pin!(conn_rx.recv());
@@ -538,93 +604,10 @@ async fn websocket(
                             ) {
                                 match request.data {
                                     WebsocketClientMessageData::MS(media_soup) => {
-                                        let r = match media_soup {
-                                            RtpInit(rtp_capabilities) => {
-                                                match participant_connection.as_mut() {
-                                                    Some(conn) => {
-                                                        conn.client_rtp_capabilities
-                                                            .replace(rtp_capabilities);
-                                                        Ok(WebsocketServerResData::MediaSoupAck)
-                                                    }
-                                                    None => Err(anyhow!("missing p conn")),
-                                                }
-                                            }
-                                            ConnectProducerTransport(dtls_parameters) => {
-                                                match &participant_connection {
-                                                    Some(conn) => {
-                                                        let transport =
-                                                            conn.transports.producer.clone();
-
-                                                        transport
-                                                            .connect(
-                                                                WebRtcTransportRemoteParameters {
-                                                                    dtls_parameters,
-                                                                },
-                                                            )
-                                                            .await
-                                                            .and_then(|_| {
-                                                                Ok(WebsocketServerResData::MediaSoupAck)
-                                                            })
-                                                            .map_err(|err| anyhow!(err))
-                                                    }
-                                                    None => Err(anyhow!("missing p conn")),
-                                                }
-                                            }
-                                            Produce((media_kind, rtp_params)) => {
-                                                match participant_connection.as_mut() {
-                                                    Some(conn) => {
-                                                        let transport =
-                                                            conn.transports.producer.clone();
-
-                                                        let producer = transport
-                                                            .produce(ProducerOptions::new(
-                                                                media_kind, rtp_params,
-                                                            ))
-                                                            .await;
-
-                                                        let producer = producer.unwrap();
-
-                                                        conn.producers.push(producer.clone());
-
-                                                        ws_server
-                                                            .produce(
-                                                                user_id.to_string(),
-                                                                conn.id.to_string(),
-                                                                producer,
-                                                            )
-                                                            .await
-                                                            .map(|_| {
-                                                                WebsocketServerResData::MediaSoupAck
-                                                            })
-                                                    }
-                                                    None => Err(anyhow!("missing p conn")),
-                                                }
-                                            }
-                                            ConnectConsumerTransport(dtls_parameters) => {}
-                                            Consume(producer_id) => todo!(),
-                                            ConsumerResume(consumer_id) => todo!(),
-                                        };
-
+                                        let r = ms_handler(media_soup).await;
                                         if let Ok(string_payload) = serde_json::to_string(
                                             &to_request_response(r, request.id),
                                         ) {
-                                            session.text(string_payload).await.unwrap();
-                                        }
-                                    }
-                                    WebsocketClientMessageData::SetRoom(chat_id) => {
-                                        // disconnect first probs?
-                                        current_room_id.replace(chat_id);
-                                        let a = ws_server
-                                            .join_room(user_id.to_string(), chat_id.to_string())
-                                            .await;
-                                        participant_connection.replace(a);
-
-                                        if let Ok(string_payload) =
-                                            serde_json::to_string(&to_request_response(
-                                                Ok(WebsocketServerResData::MediaSoupAck),
-                                                request.id,
-                                            ))
-                                        {
                                             session.text(string_payload).await.unwrap();
                                         }
                                     }

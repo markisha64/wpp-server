@@ -64,7 +64,6 @@ pub enum WebsocketClientMessageData {
     GetMessages(crate::api::message::GetRequest),
 
     // mediasoup
-    SetRoom(ObjectId),
     MS(MediaSoup),
 }
 
@@ -77,4 +76,5 @@ pub enum MediaSoup {
     ConnectConsumerTransport(DtlsParameters),
     Consume(ProducerId),
     ConsumerResume(ConsumerId),
+    SetRoom(ObjectId),
 }
