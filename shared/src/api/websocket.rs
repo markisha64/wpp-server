@@ -32,6 +32,14 @@ pub enum WebsocketServerMessage {
         chat_id: ObjectId,
         last_message_ts: DateTime,
     },
+    ProducerAdded {
+        participant_id: String,
+        producer_id: ProducerId,
+    },
+    ProducerRemove {
+        participant_id: String,
+        producer_id: ProducerId,
+    },
 }
 
 #[derive(Clone, Serialize, Deserialize)]

@@ -34,7 +34,10 @@ use uuid::Uuid;
 
 use crate::{mongodb::MongoDatabase, redis::RedisHandle};
 use tokio::{
-    sync::{mpsc, oneshot},
+    sync::{
+        mpsc::{self, UnboundedSender},
+        oneshot,
+    },
     time::interval,
 };
 
@@ -51,6 +54,7 @@ pub struct Transports {
 }
 
 pub struct ParticipantConnection {
+    pub user_id: String,
     pub id: ConnId,
     pub client_rtp_capabilities: Option<RtpCapabilities>,
     pub consumers: HashMap<ConsumerId, Consumer>,
@@ -59,7 +63,6 @@ pub struct ParticipantConnection {
 }
 
 pub struct Room {
-    id: String,
     router: Router,
     clients: HashMap<String, Vec<Producer>>,
 }
@@ -196,7 +199,6 @@ impl WebsocketServer {
                     .map_err(|error| anyhow!("Failed to create router: {error}"))?;
 
                 v.insert(Room {
-                    id: room_id.clone(),
                     router,
                     clients: HashMap::new(),
                 });
@@ -205,8 +207,6 @@ impl WebsocketServer {
         };
 
         let room = self.rooms.get_mut(&room_id).unwrap();
-
-        room.clients.insert(user_id, Vec::new());
 
         let transport_options =
             WebRtcTransportOptions::new(WebRtcTransportListenInfos::new(ListenInfo {
@@ -234,6 +234,7 @@ impl WebsocketServer {
 
         Ok((
             ParticipantConnection {
+                user_id,
                 id: Uuid::new_v4(),
                 client_rtp_capabilities: None,
                 consumers: HashMap::new(),
@@ -255,9 +256,23 @@ impl WebsocketServer {
     ) -> anyhow::Result<()> {
         let room = self.rooms.get_mut(&room_id).context("missing room")?;
 
-        let producers = room.clients.get_mut(&user_id).context("missing user")?;
+        let producers = room.clients.entry(user_id.clone()).or_default();
+        let producer_id = producer.id();
 
         producers.push(producer);
+
+        for tproducer in producers {
+            if producer_id != tproducer.id() {
+                if let Some(connections) = self.connections.get(&user_id) {
+                    for (_id, conn) in connections {
+                        let _ = conn.send(WebsocketServerMessage::ProducerAdded {
+                            participant_id: user_id.clone(),
+                            producer_id,
+                        });
+                    }
+                }
+            }
+        }
 
         Ok(())
     }
@@ -607,12 +622,12 @@ async fn websocket(
                     SetRoom(chat_id) => {
                         // disconnect first probs?
                         current_room_id.replace(chat_id);
-                        let (a, router_rtp_capabilities) = ws_server
+                        let (conn, router_rtp_capabilities) = ws_server
                             .join_room(user_id.to_string(), chat_id.to_string())
                             .await;
 
-                        let consumer = &a.transports.consumer;
-                        let producer = &a.transports.producer;
+                        let consumer = &conn.transports.consumer;
+                        let producer = &conn.transports.producer;
 
                         let r = WebsocketServerResData::SetRoom {
                             room_id: chat_id.to_string(),
@@ -631,7 +646,7 @@ async fn websocket(
                             router_rtp_capabilities,
                         };
 
-                        participant_connection.replace(a);
+                        participant_connection.replace(conn);
 
                         Ok(r)
                     }
