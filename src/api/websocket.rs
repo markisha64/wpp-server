@@ -35,7 +35,7 @@ use uuid::Uuid;
 use crate::{mongodb::MongoDatabase, redis::RedisHandle};
 use tokio::{
     sync::{
-        mpsc::{self, UnboundedSender},
+        mpsc::{self},
         oneshot,
     },
     time::interval,
@@ -612,8 +612,8 @@ async fn websocket(
                         let _ = conn
                             .consumers
                             .get(&consumer_id)
-                            .cloned()
                             .context("missing consumer")?
+                            .clone()
                             .resume()
                             .await;
 
