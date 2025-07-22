@@ -61,6 +61,7 @@ pub enum WebsocketServerResData {
         consumer_transport_options: TransportOptions,
         producer_transport_options: TransportOptions,
         router_rtp_capabilities: RtpCapabilitiesFinalized,
+        producers: Vec<(String, ProducerId)>,
     },
     RtpInit,
     ConnectProducerTransport,

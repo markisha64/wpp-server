@@ -67,6 +67,15 @@ pub struct Room {
     clients: HashMap<String, Vec<Producer>>,
 }
 
+impl Room {
+    fn producers(&self) -> Vec<(String, ProducerId)> {
+        self.clients
+            .iter()
+            .flat_map(|(user_id, producers)| producers.iter().map(|x| (user_id.clone(), x.id())))
+            .collect()
+    }
+}
+
 enum Command {
     Connect {
         user_id: String,
@@ -88,7 +97,13 @@ enum Command {
     JoinRoom {
         user_id: String,
         room_id: String,
-        res_tx: oneshot::Sender<anyhow::Result<(ParticipantConnection, RtpCapabilitiesFinalized)>>,
+        res_tx: oneshot::Sender<
+            anyhow::Result<(
+                ParticipantConnection,
+                RtpCapabilitiesFinalized,
+                Vec<(String, ProducerId)>,
+            )>,
+        >,
     },
 
     Produce {
@@ -163,7 +178,11 @@ impl WebsocketServer {
         &mut self,
         user_id: String,
         room_id: String,
-    ) -> anyhow::Result<(ParticipantConnection, RtpCapabilitiesFinalized)> {
+    ) -> anyhow::Result<(
+        ParticipantConnection,
+        RtpCapabilitiesFinalized,
+        Vec<(String, ProducerId)>,
+    )> {
         let entry = self.rooms.entry(room_id.clone());
 
         match entry {
@@ -245,6 +264,7 @@ impl WebsocketServer {
                 },
             },
             room.router.rtp_capabilities().clone(),
+            room.producers(),
         ))
     }
 
@@ -387,7 +407,11 @@ impl WebsocketSeverHandle {
         &self,
         user_id: String,
         room_id: String,
-    ) -> (ParticipantConnection, RtpCapabilitiesFinalized) {
+    ) -> (
+        ParticipantConnection,
+        RtpCapabilitiesFinalized,
+        Vec<(String, ProducerId)>,
+    ) {
         let (res_tx, res_rx) = oneshot::channel();
 
         self.cmd_tx
@@ -622,7 +646,7 @@ async fn websocket(
                     SetRoom(chat_id) => {
                         // disconnect first probs?
                         current_room_id.replace(chat_id);
-                        let (conn, router_rtp_capabilities) = ws_server
+                        let (conn, router_rtp_capabilities, producers) = ws_server
                             .join_room(user_id.to_string(), chat_id.to_string())
                             .await;
 
@@ -644,6 +668,7 @@ async fn websocket(
                                 ice_parameters: producer.ice_parameters().clone(),
                             },
                             router_rtp_capabilities,
+                            producers,
                         };
 
                         participant_connection.replace(conn);
