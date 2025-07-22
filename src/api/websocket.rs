@@ -24,7 +24,7 @@ use shared::api::{
     websocket::{
         MediaSoup::{
             self, ConnectConsumerTransport, ConnectProducerTransport, Consume, ConsumerResume,
-            Produce, RtpInit, SetRoom,
+            Produce, SetRoom,
         },
         TransportOptions, WebsocketClientMessage, WebsocketClientMessageData,
         WebsocketServerMessage, WebsocketServerResData,
@@ -56,7 +56,7 @@ pub struct Transports {
 pub struct ParticipantConnection {
     pub _user_id: String,
     pub room_id: String,
-    pub client_rtp_capabilities: Option<RtpCapabilities>,
+    pub client_rtp_capabilities: RtpCapabilities,
     pub consumers: HashMap<ConsumerId, Consumer>,
     pub producers: Vec<Producer>,
     pub transports: Transports,
@@ -97,6 +97,7 @@ enum Command {
     JoinRoom {
         user_id: String,
         room_id: String,
+        client_rtp_capabilities: RtpCapabilities,
         res_tx: oneshot::Sender<
             anyhow::Result<(
                 ParticipantConnection,
@@ -178,6 +179,7 @@ impl WebsocketServer {
         &mut self,
         user_id: String,
         room_id: String,
+        client_rtp_capabilities: RtpCapabilities,
     ) -> anyhow::Result<(
         ParticipantConnection,
         RtpCapabilitiesFinalized,
@@ -255,7 +257,7 @@ impl WebsocketServer {
             ParticipantConnection {
                 _user_id: user_id,
                 room_id,
-                client_rtp_capabilities: None,
+                client_rtp_capabilities,
                 consumers: HashMap::new(),
                 producers: Vec::new(),
                 transports: Transports {
@@ -325,9 +327,12 @@ impl WebsocketServer {
                 Command::JoinRoom {
                     user_id,
                     room_id,
+                    client_rtp_capabilities,
                     res_tx,
                 } => {
-                    let connection = self.join_room(user_id, room_id).await;
+                    let connection = self
+                        .join_room(user_id, room_id, client_rtp_capabilities)
+                        .await;
                     let _ = res_tx.send(connection);
                 }
 
@@ -407,6 +412,7 @@ impl WebsocketSeverHandle {
         &self,
         user_id: String,
         room_id: String,
+        client_rtp_capabilities: RtpCapabilities,
     ) -> (
         ParticipantConnection,
         RtpCapabilitiesFinalized,
@@ -418,6 +424,7 @@ impl WebsocketSeverHandle {
             .send(Command::JoinRoom {
                 user_id,
                 room_id,
+                client_rtp_capabilities,
                 res_tx,
             })
             .unwrap();
@@ -555,13 +562,6 @@ async fn websocket(
         let mut ms_handler =
             async |media_soup: MediaSoup| -> anyhow::Result<WebsocketServerResData> {
                 match media_soup {
-                    RtpInit(rtp_capabilities) => {
-                        let conn = participant_connection.as_mut().context("missing p conn")?;
-
-                        conn.client_rtp_capabilities.replace(rtp_capabilities);
-
-                        Ok(WebsocketServerResData::RtpInit)
-                    }
                     ConnectProducerTransport(dtls_parameters) => {
                         let conn = participant_connection.as_ref().context("missing p conn")?;
 
@@ -606,10 +606,7 @@ async fn websocket(
                     Consume(producer_id) => {
                         let conn = participant_connection.as_mut().context("missing p conn")?;
 
-                        let rtp_capabilities = conn
-                            .client_rtp_capabilities
-                            .clone()
-                            .context("missing rtp capabilities")?;
+                        let rtp_capabilities = conn.client_rtp_capabilities.clone();
 
                         let mut options = ConsumerOptions::new(producer_id, rtp_capabilities);
                         options.paused = true;
@@ -643,11 +640,11 @@ async fn websocket(
 
                         Ok(WebsocketServerResData::ConsumerResume)
                     }
-                    SetRoom(chat_id) => {
+                    SetRoom((chat_id, rtp_capabilities)) => {
                         // disconnect first probs?
                         current_room_id.replace(chat_id);
                         let (conn, router_rtp_capabilities, producers) = ws_server
-                            .join_room(user_id.to_string(), chat_id.to_string())
+                            .join_room(user_id.to_string(), chat_id.to_string(), rtp_capabilities)
                             .await;
 
                         let consumer = &conn.transports.consumer;

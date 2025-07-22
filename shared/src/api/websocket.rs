@@ -63,7 +63,6 @@ pub enum WebsocketServerResData {
         router_rtp_capabilities: RtpCapabilitiesFinalized,
         producers: Vec<(String, ProducerId)>,
     },
-    RtpInit,
     ConnectProducerTransport,
     Produce(ProducerId),
     ConnectConsumerTransport,
@@ -102,11 +101,10 @@ pub enum WebsocketClientMessageData {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "t", content = "c")]
 pub enum MediaSoup {
-    RtpInit(RtpCapabilities),
     ConnectProducerTransport(DtlsParameters),
     Produce((MediaKind, RtpParameters)),
     ConnectConsumerTransport(DtlsParameters),
     Consume(ProducerId),
     ConsumerResume(ConsumerId),
-    SetRoom(ObjectId),
+    SetRoom((ObjectId, RtpCapabilities)),
 }
