@@ -107,10 +107,16 @@ enum Command {
         >,
     },
 
-    Produce {
+    ProducerAdded {
         user_id: String,
         room_id: String,
         producer: Producer,
+        res_tx: oneshot::Sender<anyhow::Result<()>>,
+    },
+
+    RemoveParticipant {
+        user_id: String,
+        room_id: String,
         res_tx: oneshot::Sender<anyhow::Result<()>>,
     },
 }
@@ -270,7 +276,7 @@ impl WebsocketServer {
         ))
     }
 
-    pub fn produce(
+    pub fn producer_added(
         &mut self,
         user_id: String,
         room_id: String,
@@ -283,14 +289,42 @@ impl WebsocketServer {
 
         producers.push(producer);
 
-        for tproducer in producers {
-            if producer_id != tproducer.id() {
+        for recipient in room.clients.keys() {
+            if recipient != &user_id {
                 if let Some(connections) = self.connections.get(&user_id) {
                     for (_id, conn) in connections {
                         let _ = conn.send(WebsocketServerMessage::ProducerAdded {
                             participant_id: user_id.clone(),
                             producer_id,
                         });
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn remove_participant(
+        &mut self,
+        user_id: String,
+        room_id: String,
+    ) -> anyhow::Result<()> {
+        let room = self.rooms.get_mut(&room_id).context("missing room")?;
+
+        let producers = room.clients.remove(&user_id);
+
+        // this is disgusting haha
+        if let Some(producers) = producers {
+            for producer in producers {
+                for receiver in room.clients.keys() {
+                    if let Some(conns) = self.connections.get(receiver) {
+                        for (_, connection) in conns {
+                            let _ = connection.send(WebsocketServerMessage::ProducerRemove {
+                                participant_id: user_id.clone(),
+                                producer_id: producer.id(),
+                            });
+                        }
                     }
                 }
             }
@@ -336,13 +370,22 @@ impl WebsocketServer {
                     let _ = res_tx.send(connection);
                 }
 
-                Command::Produce {
+                Command::ProducerAdded {
                     user_id,
                     room_id,
                     producer,
                     res_tx,
                 } => {
-                    let res = self.produce(user_id, room_id, producer);
+                    let res = self.producer_added(user_id, room_id, producer);
+                    let _ = res_tx.send(res);
+                }
+
+                Command::RemoveParticipant {
+                    user_id,
+                    room_id,
+                    res_tx,
+                } => {
+                    let res = self.remove_participant(user_id, room_id).await;
                     let _ = res_tx.send(res);
                 }
             }
@@ -432,7 +475,7 @@ impl WebsocketSeverHandle {
         res_rx.await.unwrap().unwrap()
     }
 
-    pub async fn produce(
+    pub async fn producer_added(
         &self,
         user_id: String,
         room_id: String,
@@ -441,10 +484,24 @@ impl WebsocketSeverHandle {
         let (res_tx, res_rx) = oneshot::channel();
 
         self.cmd_tx
-            .send(Command::Produce {
+            .send(Command::ProducerAdded {
                 user_id,
                 room_id,
                 producer,
+                res_tx,
+            })
+            .unwrap();
+
+        res_rx.await.unwrap()
+    }
+
+    pub async fn remove_participant(&self, user_id: String, room_id: String) -> anyhow::Result<()> {
+        let (res_tx, res_rx) = oneshot::channel();
+
+        self.cmd_tx
+            .send(Command::RemoveParticipant {
+                user_id,
+                room_id,
                 res_tx,
             })
             .unwrap();
@@ -588,7 +645,7 @@ async fn websocket(
                         conn.producers.push(producer.clone());
 
                         ws_server
-                            .produce(user_id.to_string(), conn.room_id.clone(), producer)
+                            .producer_added(user_id.to_string(), conn.room_id.clone(), producer)
                             .await
                             .map(|_| WebsocketServerResData::Produce(id))
                     }
@@ -760,6 +817,15 @@ async fn websocket(
                 }
             }
         };
+
+        // handle mediasoup disconnect
+        if let Some(_conn) = participant_connection {
+            if let Some(chat_id) = current_room_id {
+                let _ = ws_server
+                    .remove_participant(user_id.to_string(), chat_id.to_string())
+                    .await;
+            }
+        }
 
         ws_server.disconnect(user_id.to_string(), conn_id);
 
