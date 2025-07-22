@@ -54,8 +54,8 @@ pub struct Transports {
 }
 
 pub struct ParticipantConnection {
-    pub user_id: String,
-    pub id: ConnId,
+    pub _user_id: String,
+    pub room_id: String,
     pub client_rtp_capabilities: Option<RtpCapabilities>,
     pub consumers: HashMap<ConsumerId, Consumer>,
     pub producers: Vec<Producer>,
@@ -234,8 +234,8 @@ impl WebsocketServer {
 
         Ok((
             ParticipantConnection {
-                user_id,
-                id: Uuid::new_v4(),
+                _user_id: user_id,
+                room_id,
                 client_rtp_capabilities: None,
                 consumers: HashMap::new(),
                 producers: Vec::new(),
@@ -564,7 +564,7 @@ async fn websocket(
                         conn.producers.push(producer.clone());
 
                         ws_server
-                            .produce(user_id.to_string(), conn.id.to_string(), producer)
+                            .produce(user_id.to_string(), conn.room_id.clone(), producer)
                             .await
                             .map(|_| WebsocketServerResData::Produce(id))
                     }
