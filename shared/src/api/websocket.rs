@@ -8,6 +8,8 @@ use crate::{
     models::{chat::ChatSafe, chat_message::ChatMessageSafe, chat_user::ChatUserPopulated},
 };
 
+use super::media::{UploadFileRequest, UploadFileResponse};
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct TransportOptions {
     pub id: TransportId,
@@ -55,6 +57,9 @@ pub enum WebsocketServerResData {
     NewMessage(ChatMessageSafe),
     GetMessages(Vec<ChatMessageSafe>),
 
+    // media routes
+    UploadFile(UploadFileResponse),
+
     // mediasoup
     SetRoom {
         room_id: String,
@@ -93,6 +98,9 @@ pub enum WebsocketClientMessageData {
     // message routes
     NewMessage(crate::api::message::CreateRequest),
     GetMessages(crate::api::message::GetRequest),
+
+    // media routes
+    UploadFile(UploadFileRequest),
 
     // mediasoup
     MS(MediaSoup),

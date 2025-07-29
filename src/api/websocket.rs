@@ -43,7 +43,7 @@ use tokio::{
 
 use super::{
     chat::{self},
-    message,
+    media, message,
 };
 
 type ConnId = Uuid;
@@ -578,6 +578,14 @@ async fn request_handler(
             let req_res = message::get_messages(ws_server.db.clone(), &user, req_data)
                 .await
                 .map(|data| WebsocketServerResData::GetMessages(data));
+
+            to_request_response(req_res, request.id)
+        }
+
+        WebsocketClientMessageData::UploadFile(req_data) => {
+            let req_res = media::upload_file(ws_server.db.clone(), req_data)
+                .await
+                .map(|data| WebsocketServerResData::UploadFile(data));
 
             to_request_response(req_res, request.id)
         }
