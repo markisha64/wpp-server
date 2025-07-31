@@ -43,7 +43,7 @@ use tokio::{
 
 use super::{
     chat::{self},
-    media, message,
+    message,
 };
 
 type ConnId = Uuid;
