@@ -5,7 +5,10 @@ use anyhow::Context;
 use bcrypt::{hash, verify};
 use mongodb::bson::doc;
 
-use crate::{jwt::JwtSignService, mongodb::MongoDatabase};
+use crate::{
+    jwt::{JwtAuth, JwtSignService},
+    mongodb::MongoDatabase,
+};
 use shared::{
     api::user::{AuthResponse, Claims, LoginRequest, RegisterRequest, UpdateRequest},
     models::{self},
@@ -120,11 +123,14 @@ async fn update(
     Ok(web::Json(()))
 }
 
-pub fn config(cfg: &mut web::ServiceConfig) {
+pub fn config(cfg: &mut web::ServiceConfig, jwt_auth: &JwtAuth<Claims>) {
     cfg.route("register", web::post().to(register))
-        .route("login", web::post().to(login));
+        .route("login", web::post().to(login))
+        .service(web::resource("update").route(web::patch().to(update).wrap(jwt_auth.to_owned())));
 }
 
-pub fn config_auth(cfg: &mut web::ServiceConfig) {
-    cfg.route("update", web::patch().to(update));
+pub fn config_wrapper(jwt_auth: &JwtAuth<Claims>) -> impl Fn(&mut web::ServiceConfig) {
+    let jwt_auth = jwt_auth.to_owned();
+
+    move |cfg: &mut web::ServiceConfig| config(cfg, &jwt_auth)
 }
