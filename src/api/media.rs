@@ -46,17 +46,17 @@ pub async fn upload_file(
     }))
 }
 
-pub fn config(cfg: &mut web::ServiceConfig, jwt_auth: &JwtAuth<Claims>) {
+pub fn config(cfg: &mut web::ServiceConfig, jwt_auth: JwtAuth<Claims>) {
     cfg.service(
         web::resource("/upload")
             .route(web::post().to(upload_file))
-            .wrap(jwt_auth.clone()),
+            .wrap(jwt_auth),
     )
     .service(fs::Files::new("/", "./media").show_files_listing());
 }
 
-pub fn config_wrapper(jwt_auth: &JwtAuth<Claims>) -> impl Fn(&mut web::ServiceConfig) {
+pub fn config_wrapper(jwt_auth: &JwtAuth<Claims>) -> impl FnOnce(&mut web::ServiceConfig) {
     let jwt_auth = jwt_auth.to_owned();
 
-    move |cfg: &mut web::ServiceConfig| config(cfg, &jwt_auth)
+    move |cfg: &mut web::ServiceConfig| config(cfg, jwt_auth)
 }

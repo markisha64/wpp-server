@@ -123,14 +123,14 @@ async fn update(
     Ok(web::Json(()))
 }
 
-pub fn config(cfg: &mut web::ServiceConfig, jwt_auth: &JwtAuth<Claims>) {
+pub fn config(cfg: &mut web::ServiceConfig, jwt_auth: JwtAuth<Claims>) {
     cfg.route("register", web::post().to(register))
         .route("login", web::post().to(login))
-        .service(web::resource("update").route(web::patch().to(update).wrap(jwt_auth.to_owned())));
+        .service(web::resource("update").route(web::patch().to(update).wrap(jwt_auth)));
 }
 
-pub fn config_wrapper(jwt_auth: &JwtAuth<Claims>) -> impl Fn(&mut web::ServiceConfig) {
+pub fn config_wrapper(jwt_auth: &JwtAuth<Claims>) -> impl FnOnce(&mut web::ServiceConfig) {
     let jwt_auth = jwt_auth.to_owned();
 
-    move |cfg: &mut web::ServiceConfig| config(cfg, &jwt_auth)
+    move |cfg: &mut web::ServiceConfig| config(cfg, jwt_auth)
 }
