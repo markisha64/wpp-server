@@ -582,14 +582,6 @@ async fn request_handler(
             to_request_response(req_res, request.id)
         }
 
-        WebsocketClientMessageData::UploadFile(req_data) => {
-            let req_res = media::upload_file(ws_server.db.clone(), req_data)
-                .await
-                .map(|data| WebsocketServerResData::UploadFile(data));
-
-            to_request_response(req_res, request.id)
-        }
-
         _ => to_request_response(Err(anyhow!("Unreachable")), request.id),
     }
 }
