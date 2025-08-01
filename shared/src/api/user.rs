@@ -28,5 +28,6 @@ pub struct Claims {
 
 #[derive(Serialize, Deserialize)]
 pub struct UpdateRequest {
-    pub display_name: String,
+    pub display_name: Option<String>,
+    pub profile_image: Option<String>,
 }

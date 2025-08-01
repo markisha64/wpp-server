@@ -8,6 +8,7 @@ pub struct User {
     pub email: String,
     pub password_hash: String,
     pub display_name: String,
+    pub profile_image: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -16,6 +17,7 @@ pub struct UserSafe {
     pub id: ObjectId,
     pub email: String,
     pub display_name: String,
+    pub profile_image: String,
 }
 
 impl From<User> for UserSafe {
@@ -24,6 +26,7 @@ impl From<User> for UserSafe {
             id: value.id.expect("converting create payload into safe"),
             email: value.email,
             display_name: value.display_name,
+            profile_image: value.profile_image,
         }
     }
 }

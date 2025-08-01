@@ -108,14 +108,22 @@ async fn update(
 ) -> actix_web::Result<impl Responder> {
     let collection = db.database.collection::<models::user::User>("users");
 
+    let mut update = doc! {};
+
+    if let Some(display_name) = &request.display_name {
+        update.insert("display_name", display_name);
+    }
+
+    if let Some(profile_image) = &request.profile_image {
+        update.insert("profile_image", profile_image);
+    }
+
     let _ = collection
         .update_one(
             doc! {
                 "_id": user.user.id
             },
-            doc! {
-                "display_name": &request.display_name
-            },
+            update,
         )
         .await
         .map_err(|err| error::ErrorInternalServerError(err))?;
