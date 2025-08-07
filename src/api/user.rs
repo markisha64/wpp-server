@@ -38,6 +38,7 @@ async fn register(
 
     let mut user = models::user::User {
         id: None,
+        profile_image: String::new(),
         email: request.email.clone(),
         password_hash: hash.clone(),
         display_name: request.display_name.clone(),
