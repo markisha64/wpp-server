@@ -124,7 +124,9 @@ async fn update(
             doc! {
                 "_id": user.user.id
             },
-            update,
+            doc! {
+                "$set": update
+            },
         )
         .await
         .map_err(|err| error::ErrorInternalServerError(err))?;
