@@ -4,6 +4,7 @@ use std::{
     net::{IpAddr, Ipv4Addr},
     num::{NonZeroU32, NonZeroU8},
     pin::pin,
+    str::FromStr,
     time::{Duration, Instant},
 };
 
@@ -245,6 +246,7 @@ impl WebsocketServer {
                 flags: None,
                 send_buffer_size: None,
                 recv_buffer_size: None,
+                expose_internal_ip: false,
             }));
 
         let producer_transport = room
@@ -295,7 +297,7 @@ impl WebsocketServer {
                     for (_id, conn) in connections {
                         let _ = conn.send(WebsocketServerMessage::ProducerAdded {
                             participant_id: user_id.clone(),
-                            producer_id,
+                            producer_id: producer_id.to_string(),
                         });
                     }
                 }
@@ -322,7 +324,7 @@ impl WebsocketServer {
                         for (_, connection) in conns {
                             let _ = connection.send(WebsocketServerMessage::ProducerRemove {
                                 participant_id: user_id.clone(),
-                                producer_id: producer.id(),
+                                producer_id: producer.id().to_string(),
                             });
                         }
                     }
@@ -647,7 +649,7 @@ async fn websocket(
                         ws_server
                             .producer_added(user_id.to_string(), conn.room_id.clone(), producer)
                             .await
-                            .map(|_| WebsocketServerResData::Produce(id))
+                            .map(|_| WebsocketServerResData::Produce(id.to_string()))
                     }
                     ConnectConsumerTransport(dtls_parameters) => {
                         let conn = participant_connection.as_ref().context("missing p conn")?;
@@ -665,7 +667,10 @@ async fn websocket(
 
                         let rtp_capabilities = conn.client_rtp_capabilities.clone();
 
-                        let mut options = ConsumerOptions::new(producer_id, rtp_capabilities);
+                        let mut options = ConsumerOptions::new(
+                            ProducerId::from_str(producer_id.as_str())?,
+                            rtp_capabilities,
+                        );
                         options.paused = true;
 
                         let consumer = conn.transports.consumer.clone().consume(options).await?;
@@ -677,7 +682,7 @@ async fn websocket(
                         conn.consumers.insert(id, consumer);
 
                         Ok(WebsocketServerResData::Consume {
-                            id,
+                            id: id.to_string(),
                             producer_id,
                             kind,
                             rtp_parameters,
@@ -685,6 +690,8 @@ async fn websocket(
                     }
                     ConsumerResume(consumer_id) => {
                         let conn = participant_connection.as_ref().context("missing p conn")?;
+
+                        let consumer_id = ConsumerId::from_str(consumer_id.as_str())?;
 
                         // we ignore error here
                         let _ = conn
@@ -710,19 +717,22 @@ async fn websocket(
                         let r = WebsocketServerResData::SetRoom {
                             room_id: chat_id.to_string(),
                             consumer_transport_options: TransportOptions {
-                                id: consumer.id(),
+                                id: consumer.id().to_string(),
                                 dtls_parameters: consumer.dtls_parameters(),
                                 ice_candidates: consumer.ice_candidates().clone(),
                                 ice_parameters: consumer.ice_parameters().clone(),
                             },
                             producer_transport_options: TransportOptions {
-                                id: producer.id(),
+                                id: producer.id().to_string(),
                                 dtls_parameters: producer.dtls_parameters(),
                                 ice_candidates: producer.ice_candidates().clone(),
                                 ice_parameters: producer.ice_parameters().clone(),
                             },
                             router_rtp_capabilities,
-                            producers,
+                            producers: producers
+                                .into_iter()
+                                .map(|(k, v)| (k, v.to_string()))
+                                .collect(),
                         };
 
                         participant_connection.replace(conn);

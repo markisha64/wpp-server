@@ -1,5 +1,8 @@
 use bson::{oid::ObjectId, DateTime};
-use mediasoup::prelude::*;
+use mediasoup_types::{
+    data_structures::{DtlsParameters, IceCandidate, IceParameters},
+    rtp_parameters::{MediaKind, RtpCapabilities, RtpCapabilitiesFinalized, RtpParameters},
+};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -10,7 +13,8 @@ use crate::{
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct TransportOptions {
-    pub id: TransportId,
+    /// TransportId
+    pub id: String,
     pub dtls_parameters: DtlsParameters,
     pub ice_candidates: Vec<IceCandidate>,
     pub ice_parameters: IceParameters,
@@ -34,41 +38,47 @@ pub enum WebsocketServerMessage {
     },
     ProducerAdded {
         participant_id: String,
-        producer_id: ProducerId,
+        /// ProducerId
+        producer_id: String,
     },
     ProducerRemove {
         participant_id: String,
-        producer_id: ProducerId,
+        /// ProducerId
+        producer_id: String,
     },
 }
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "t", content = "c")]
 pub enum WebsocketServerResData {
-    // chat routes
+    /// chat routes
     CreateChat(ChatSafe),
     JoinChat(JoinResponse),
     GetChats(Vec<ChatSafe>),
     SetChatRead(DateTime),
 
-    // message routes
+    /// message routes
     NewMessage(ChatMessageSafe),
     GetMessages(Vec<ChatMessageSafe>),
 
-    // mediasoup
+    /// mediasoup
     SetRoom {
         room_id: String,
         consumer_transport_options: TransportOptions,
         producer_transport_options: TransportOptions,
         router_rtp_capabilities: RtpCapabilitiesFinalized,
-        producers: Vec<(String, ProducerId)>,
+        /// ProducerId
+        producers: Vec<(String, String)>,
     },
     ConnectProducerTransport,
-    Produce(ProducerId),
+    /// ProducerId
+    Produce(String),
     ConnectConsumerTransport,
     Consume {
-        id: ConsumerId,
-        producer_id: ProducerId,
+        /// ConsumerId
+        id: String,
+        /// ProducerId
+        producer_id: String,
         kind: MediaKind,
         rtp_parameters: RtpParameters,
     },
@@ -84,17 +94,17 @@ pub struct WebsocketClientMessage {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "t", content = "c")]
 pub enum WebsocketClientMessageData {
-    // chat routes
+    /// chat routes
     CreateChat(crate::api::chat::CreateRequest),
     JoinChat(ObjectId),
     GetChats,
     SetChatRead(ObjectId),
 
-    // message routes
+    /// message routes
     NewMessage(crate::api::message::CreateRequest),
     GetMessages(crate::api::message::GetRequest),
 
-    // mediasoup
+    /// mediasoup
     MS(MediaSoup),
 }
 
@@ -104,7 +114,9 @@ pub enum MediaSoup {
     ConnectProducerTransport(DtlsParameters),
     Produce((MediaKind, RtpParameters)),
     ConnectConsumerTransport(DtlsParameters),
-    Consume(ProducerId),
-    ConsumerResume(ConsumerId),
+    /// ProducerId
+    Consume(String),
+    /// ConsumerId
+    ConsumerResume(String),
     SetRoom((ObjectId, RtpCapabilities)),
 }

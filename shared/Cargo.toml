@@ -7,4 +7,4 @@ edition = "2021"
 serde = { version = "1.0.217", features = ["derive"] }
 uuid = "1.13.1"
 bson = "2.13.0"
-mediasoup = "0.18.2"
+mediasoup-types = "0.2.0"
