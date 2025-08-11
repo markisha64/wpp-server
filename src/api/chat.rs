@@ -107,7 +107,7 @@ pub async fn get_single(
     let collection = db.database.collection::<ChatSafe>("chats");
 
     let chat = collection
-        .aggregate(vec![
+        .aggregate([
             doc! {
                 "$match": {
                     "_id": chat_id
@@ -200,7 +200,7 @@ pub async fn get_chats(
     let collection = db.database.collection::<ChatSafe>("chats");
 
     let chats = collection
-        .aggregate(vec![
+        .aggregate([
             doc! {
                 "$lookup": {
                     "from": "chat_users",
