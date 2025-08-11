@@ -1,3 +1,4 @@
+use bson::oid::ObjectId;
 use serde::{Deserialize, Serialize};
 
 use crate::models::user::UserSafe;
@@ -17,12 +18,13 @@ pub struct LoginRequest {
 
 #[derive(Serialize, Deserialize)]
 pub struct AuthResponse {
+    pub user: UserSafe,
     pub token: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Claims {
-    pub user: UserSafe,
+    pub user_id: ObjectId,
     pub exp: usize,
 }
 

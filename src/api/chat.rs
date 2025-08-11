@@ -8,13 +8,13 @@ use futures_util::{try_join, StreamExt, TryStreamExt};
 use shared::{
     api::{
         chat::{CreateRequest, JoinResponse},
-        user::Claims,
         websocket::WebsocketServerMessage,
     },
     models::{
         chat::{Chat, ChatSafe},
         chat_message::ChatMessage,
         chat_user::{ChatUser, ChatUserPopulated},
+        user::UserSafe,
     },
 };
 
@@ -22,7 +22,7 @@ use crate::{mongodb::MongoDatabase, redis::RedisHandle};
 
 pub async fn create(
     db: web::Data<MongoDatabase>,
-    user: &web::ReqData<Claims>,
+    user: &UserSafe,
     request: CreateRequest,
 ) -> anyhow::Result<ChatSafe> {
     let collection = db.database.collection::<Chat>("chats");
@@ -32,7 +32,7 @@ pub async fn create(
     let mut chat = Chat {
         id: None,
         name: request.name.clone(),
-        creator: user.user.id,
+        creator: user.id,
         first_message_ts: None,
         last_message_ts: None,
     };
@@ -62,7 +62,7 @@ pub async fn create(
         .insert_one(ChatUser {
             id: None,
             chat_id,
-            user_id: user.user.id,
+            user_id: user.id,
             last_message_seen_ts: ts,
         })
         .into_future();
@@ -92,9 +92,9 @@ pub async fn create(
 
     safe.messages.push(msg.into());
     safe.users.push(ChatUserPopulated {
-        id: user.user.id,
+        id: user.id,
         last_message_seen_ts: ts,
-        display_name: user.user.display_name.clone(),
+        display_name: user.display_name.clone(),
     });
 
     Ok(safe)
@@ -107,7 +107,7 @@ pub async fn get_single(
     let collection = db.database.collection::<ChatSafe>("chats");
 
     let chat = collection
-        .aggregate(vec![
+        .aggregate([
             doc! {
                 "$match": {
                     "_id": chat_id
@@ -153,13 +153,13 @@ pub async fn get_single(
 
 pub async fn join(
     db: web::Data<MongoDatabase>,
-    user: &web::ReqData<Claims>,
+    user: &UserSafe,
     redis_handle: web::Data<RedisHandle>,
     chat_id: ObjectId,
 ) -> anyhow::Result<JoinResponse> {
     let chat = get_single(db.clone(), chat_id).await?;
 
-    if chat.users.iter().find(|x| x.id == user.user.id).is_some() {
+    if chat.users.iter().find(|x| x.id == user.id).is_some() {
         return Ok(JoinResponse {});
     }
 
@@ -168,7 +168,7 @@ pub async fn join(
         .insert_one(ChatUser {
             id: None,
             chat_id: chat.id,
-            user_id: user.user.id,
+            user_id: user.id,
             last_message_seen_ts: chat.last_message_ts,
         })
         .await?;
@@ -176,9 +176,9 @@ pub async fn join(
     let notif_payload = WebsocketServerMessage::UserJoined {
         chat_id: chat.id,
         user: ChatUserPopulated {
-            id: user.user.id,
+            id: user.id,
             last_message_seen_ts: chat.last_message_ts,
-            display_name: user.user.display_name.clone(),
+            display_name: user.display_name.clone(),
         },
     };
 
@@ -195,12 +195,12 @@ pub async fn join(
 
 pub async fn get_chats(
     db: web::Data<MongoDatabase>,
-    user: &web::ReqData<Claims>,
+    user: &UserSafe,
 ) -> anyhow::Result<Vec<ChatSafe>> {
     let collection = db.database.collection::<ChatSafe>("chats");
 
     let chats = collection
-        .aggregate(vec![
+        .aggregate([
             doc! {
                 "$lookup": {
                     "from": "chat_users",
@@ -210,7 +210,7 @@ pub async fn get_chats(
                     "pipeline": [
                         {
                             "$match": {
-                                "user_id": user.user.id
+                                "user_id": user.id
                             }
                         },
                         {
@@ -238,7 +238,7 @@ pub async fn get_chats(
                 "$match": {
                     "users": {
                         "$elemMatch": {
-                            "_id": user.user.id
+                            "_id": user.id
                         }
                     }
                 }
@@ -261,7 +261,7 @@ pub async fn get_chats(
 
 pub async fn set_chat_read(
     db: web::Data<MongoDatabase>,
-    user: &web::ReqData<Claims>,
+    user: &UserSafe,
     redis_handle: web::Data<RedisHandle>,
     chat_id: ObjectId,
 ) -> anyhow::Result<DateTime> {
@@ -272,7 +272,7 @@ pub async fn set_chat_read(
         .update_one(
             doc! {
                 "chat_id": chat.id,
-                "user_id": user.user.id
+                "user_id": user.id
             },
             doc! {
                 "last_message_seen_ts": chat.last_message_ts
@@ -284,7 +284,7 @@ pub async fn set_chat_read(
         chat_id: chat.id,
         last_message_ts: chat.last_message_ts,
     };
-    let user_ids = vec![user.user.id];
+    let user_ids = vec![user.id];
 
     actix_web::rt::spawn(async move {
         redis_handle

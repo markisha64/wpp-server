@@ -9,12 +9,12 @@ use crate::{mongodb::MongoDatabase, redis::RedisHandle};
 use shared::{
     api::{
         message::{CreateRequest, GetRequest},
-        user::Claims,
         websocket::WebsocketServerMessage,
     },
     models::{
         chat::Chat,
         chat_message::{ChatMessage, ChatMessageSafe},
+        user::UserSafe,
     },
 };
 
@@ -22,7 +22,7 @@ use super::chat::get_single;
 
 pub async fn create(
     db: web::Data<MongoDatabase>,
-    user: &web::ReqData<Claims>,
+    user: &UserSafe,
     redis_handle: web::Data<RedisHandle>,
     request: CreateRequest,
 ) -> anyhow::Result<ChatMessageSafe> {
@@ -31,7 +31,7 @@ pub async fn create(
 
     let chat = get_single(db.clone(), request.chat_id).await?;
 
-    if chat.users.iter().find(|x| x.id == user.user.id).is_none() {
+    if chat.users.iter().find(|x| x.id == user.id).is_none() {
         return Err(anyhow!("chat not found"));
     }
 
@@ -40,7 +40,7 @@ pub async fn create(
     let mut message = ChatMessage {
         id: None,
         chat_id: request.chat_id,
-        creator: Some(user.user.id),
+        creator: Some(user.id),
         created_at: ts,
         deleted_at: None,
         content: request.content.clone(),
@@ -80,13 +80,13 @@ pub async fn create(
 
 pub async fn get_messages(
     db: web::Data<MongoDatabase>,
-    user: &web::ReqData<Claims>,
+    user: &UserSafe,
     request: GetRequest,
 ) -> anyhow::Result<Vec<ChatMessageSafe>> {
     let collection = db.database.collection::<ChatMessageSafe>("chat_messages");
 
     let chat = get_single(db.clone(), request.chat_id).await?;
-    if chat.users.iter().find(|x| x.id == user.user.id).is_none() {
+    if chat.users.iter().find(|x| x.id == user.id).is_none() {
         return Err(anyhow!("chat not found"));
     }
 

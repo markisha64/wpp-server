@@ -8,7 +8,9 @@ use uuid::Uuid;
 
 use crate::{
     api::chat::JoinResponse,
-    models::{chat::ChatSafe, chat_message::ChatMessageSafe, chat_user::ChatUserPopulated},
+    models::{
+        chat::ChatSafe, chat_message::ChatMessageSafe, chat_user::ChatUserPopulated, user::UserSafe,
+    },
 };
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -23,6 +25,7 @@ pub struct TransportOptions {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "t", content = "c")]
 pub enum WebsocketServerMessage {
+    ProfileUpdated(UserSafe),
     NewMessage(ChatMessageSafe),
     UserJoined {
         chat_id: ObjectId,
@@ -51,6 +54,10 @@ pub enum WebsocketServerMessage {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "t", content = "c")]
 pub enum WebsocketServerResData {
+    /// other
+    ProfileUpdate(UserSafe),
+    GetSelf(UserSafe),
+
     /// chat routes
     CreateChat(ChatSafe),
     JoinChat(JoinResponse),
@@ -94,6 +101,10 @@ pub struct WebsocketClientMessage {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "t", content = "c")]
 pub enum WebsocketClientMessageData {
+    /// other
+    GetSelf,
+    ProfileUpdate(crate::api::user::UpdateRequest),
+
     /// chat routes
     CreateChat(crate::api::chat::CreateRequest),
     JoinChat(ObjectId),
