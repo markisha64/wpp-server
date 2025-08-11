@@ -67,7 +67,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(jwt_service.to_owned())
             .app_data(ws_handle.clone())
             .app_data(web::Data::new(redis_handle.clone()))
-            .service(web::scope("/user").configure(api::user::config_wrapper(&jwt_auth)))
+            .service(web::scope("/user").configure(api::user::config))
             .service(web::scope("/media").configure(api::media::config_wrapper(&jwt_auth)))
             .service(
                 web::scope("/ws")

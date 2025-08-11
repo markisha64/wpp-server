@@ -7,7 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use actix_web::{web, HttpRequest, Responder};
+use actix_web::{error::ErrorInternalServerError, web, HttpRequest, Responder};
 use actix_ws::{self, AggregatedMessage};
 use anyhow::{anyhow, Context};
 use futures_util::{
@@ -19,16 +19,19 @@ use mediasoup::{
     worker::{WorkerLogLevel, WorkerLogTag},
 };
 use mongodb::bson::oid::ObjectId;
-use shared::api::{
-    user::Claims,
-    websocket::{
-        MediaSoup::{
-            self, ConnectConsumerTransport, ConnectProducerTransport, Consume, ConsumerResume,
-            Produce, SetRoom,
+use shared::{
+    api::{
+        user::Claims,
+        websocket::{
+            MediaSoup::{
+                self, ConnectConsumerTransport, ConnectProducerTransport, Consume, ConsumerResume,
+                Produce, SetRoom,
+            },
+            TransportOptions, WebsocketClientMessage, WebsocketClientMessageData,
+            WebsocketServerMessage, WebsocketServerResData,
         },
-        TransportOptions, WebsocketClientMessage, WebsocketClientMessageData,
-        WebsocketServerMessage, WebsocketServerResData,
     },
+    models::user::UserSafe,
 };
 use uuid::Uuid;
 
@@ -44,6 +47,7 @@ use tokio::{
 use super::{
     chat::{self},
     message,
+    user::get_single,
 };
 
 type ConnId = Uuid;
@@ -527,13 +531,13 @@ async fn request_handler(
     request: WebsocketClientMessage,
     ws_server: web::Data<WebsocketSeverHandle>,
     redis_handle: web::Data<RedisHandle>,
-    user: &web::ReqData<Claims>,
+    user: &mut UserSafe,
 ) -> WebsocketServerMessage {
     let ws_server = ws_server.clone();
 
     match request.data {
         WebsocketClientMessageData::CreateChat(req_data) => {
-            let req_res = chat::create(ws_server.db.clone(), &user, req_data)
+            let req_res = chat::create(ws_server.db.clone(), user, req_data)
                 .await
                 .map(|data| WebsocketServerResData::CreateChat(data));
 
@@ -541,7 +545,7 @@ async fn request_handler(
         }
 
         WebsocketClientMessageData::JoinChat(id) => {
-            let req_res = chat::join(ws_server.db.clone(), &user, redis_handle.clone(), id)
+            let req_res = chat::join(ws_server.db.clone(), user, redis_handle.clone(), id)
                 .await
                 .map(|data| WebsocketServerResData::JoinChat(data));
 
@@ -549,7 +553,7 @@ async fn request_handler(
         }
 
         WebsocketClientMessageData::GetChats => {
-            let req_res = chat::get_chats(ws_server.db.clone(), &user)
+            let req_res = chat::get_chats(ws_server.db.clone(), user)
                 .await
                 .map(|data| WebsocketServerResData::GetChats(data));
 
@@ -557,10 +561,9 @@ async fn request_handler(
         }
 
         WebsocketClientMessageData::SetChatRead(id) => {
-            let req_res =
-                chat::set_chat_read(ws_server.db.clone(), &user, redis_handle.clone(), id)
-                    .await
-                    .map(|data| WebsocketServerResData::SetChatRead(data));
+            let req_res = chat::set_chat_read(ws_server.db.clone(), user, redis_handle.clone(), id)
+                .await
+                .map(|data| WebsocketServerResData::SetChatRead(data));
 
             to_request_response(req_res, request.id)
         }
@@ -582,6 +585,31 @@ async fn request_handler(
             to_request_response(req_res, request.id)
         }
 
+        WebsocketClientMessageData::ProfileUpdate(req_data) => {
+            let req_res = crate::api::user::update(
+                ws_server.db.clone(),
+                &user,
+                req_data,
+                redis_handle.clone(),
+            )
+            .await
+            .map(move |res| {
+                *user = res.clone();
+
+                WebsocketServerResData::ProfileUpdate(res)
+            });
+
+            to_request_response(req_res, request.id)
+        }
+
+        WebsocketClientMessageData::GetSelf => {
+            let req_res = crate::api::user::get_single(ws_server.db.clone(), &user.id)
+                .await
+                .map(|data| WebsocketServerResData::GetSelf(data));
+
+            to_request_response(req_res, request.id)
+        }
+
         _ => to_request_response(Err(anyhow!("Unreachable")), request.id),
     }
 }
@@ -595,9 +623,12 @@ async fn websocket(
 ) -> actix_web::Result<impl Responder> {
     let (res, mut session, msg_stream) = actix_ws::handle(&req, body)?;
 
+    let mut user = get_single(ws_server.db.clone(), &user.user_id)
+        .await
+        .map_err(|e| ErrorInternalServerError(e))?;
+
     actix_web::rt::spawn(async move {
-        let user = user.clone();
-        let user_id = user.user.id;
+        let user_id = user.id;
 
         let mut current_room_id: Option<ObjectId> = Option::None;
         let mut participant_connection: Option<ParticipantConnection> = Option::None;
@@ -773,7 +804,7 @@ async fn websocket(
                                         request,
                                         ws_server.clone(),
                                         redis_handle.clone(),
-                                        &user,
+                                        &mut user,
                                     )
                                     .await;
 

@@ -1,17 +1,20 @@
 use chrono::{Duration, Utc};
 
-use actix_web::{error, web, Responder};
+use actix_web::{
+    error::{self},
+    web, Responder,
+};
 use anyhow::Context;
 use bcrypt::{hash, verify};
-use mongodb::bson::doc;
+use mongodb::bson::{doc, oid::ObjectId};
 
-use crate::{
-    jwt::{JwtAuth, JwtSignService},
-    mongodb::MongoDatabase,
-};
+use crate::{jwt::JwtSignService, mongodb::MongoDatabase, redis::RedisHandle};
 use shared::{
-    api::user::{AuthResponse, Claims, LoginRequest, RegisterRequest, UpdateRequest},
-    models::{self},
+    api::{
+        user::{AuthResponse, Claims, LoginRequest, RegisterRequest, UpdateRequest},
+        websocket::WebsocketServerMessage,
+    },
+    models::{self, user::UserSafe},
 };
 
 async fn register(
@@ -51,8 +54,10 @@ async fn register(
 
     user.id = inserted.inserted_id.as_object_id();
 
+    let user: UserSafe = user.into();
+
     let claims = Claims {
-        user: user.into(),
+        user_id: user.id,
         exp: (Utc::now() + Duration::days(1)).timestamp() as usize,
     };
 
@@ -60,7 +65,7 @@ async fn register(
         .sign(&claims)
         .map_err(|err| error::ErrorInternalServerError(err))?;
 
-    Ok(web::Json(AuthResponse { token }))
+    Ok(web::Json(AuthResponse { token, user }))
 }
 
 async fn login(
@@ -90,8 +95,10 @@ async fn login(
         return Err(error::ErrorNotFound("incorrect email/password"));
     }
 
+    let user: models::user::UserSafe = user.into();
+
     let claims = Claims {
-        user: user.into(),
+        user_id: user.id,
         exp: (Utc::now() + Duration::days(1)).timestamp() as usize,
     };
 
@@ -99,14 +106,15 @@ async fn login(
         .sign(&claims)
         .map_err(|err| error::ErrorInternalServerError(err))?;
 
-    Ok(web::Json(AuthResponse { token }))
+    Ok(web::Json(AuthResponse { user, token }))
 }
 
-async fn update(
+pub async fn update(
     db: web::Data<MongoDatabase>,
-    user: web::ReqData<Claims>,
-    request: web::Json<UpdateRequest>,
-) -> actix_web::Result<impl Responder> {
+    user: &UserSafe,
+    request: UpdateRequest,
+    redis_handle: web::Data<RedisHandle>,
+) -> anyhow::Result<UserSafe> {
     let collection = db.database.collection::<models::user::User>("users");
 
     let mut update = doc! {};
@@ -122,26 +130,43 @@ async fn update(
     let _ = collection
         .update_one(
             doc! {
-                "_id": user.user.id
+                "_id": user.id
             },
             doc! {
                 "$set": update
             },
         )
-        .await
-        .map_err(|err| error::ErrorInternalServerError(err))?;
+        .await?;
 
-    Ok(web::Json(()))
+    let user = get_single(db, &user.id).await?;
+
+    let user_ids = vec![user.id];
+    let message = WebsocketServerMessage::ProfileUpdated(user.clone());
+
+    actix_web::rt::spawn(async move {
+        redis_handle.send_message_to_users(&user_ids, message).await;
+    });
+
+    Ok(user)
 }
 
-pub fn config(cfg: &mut web::ServiceConfig, jwt_auth: JwtAuth<Claims>) {
+pub async fn get_single(
+    db: web::Data<MongoDatabase>,
+    user_id: &ObjectId,
+) -> anyhow::Result<UserSafe> {
+    let collection = db.database.collection::<models::user::User>("users");
+
+    let user = collection
+        .find_one(doc! {
+            "_id": user_id
+        })
+        .await?
+        .context("Missing user")?;
+
+    Ok(user.into())
+}
+
+pub fn config(cfg: &mut web::ServiceConfig) {
     cfg.route("register", web::post().to(register))
-        .route("login", web::post().to(login))
-        .service(web::resource("update").route(web::patch().to(update).wrap(jwt_auth)));
-}
-
-pub fn config_wrapper(jwt_auth: &JwtAuth<Claims>) -> impl FnOnce(&mut web::ServiceConfig) {
-    let jwt_auth = jwt_auth.to_owned();
-
-    move |cfg: &mut web::ServiceConfig| config(cfg, jwt_auth)
+        .route("login", web::post().to(login));
 }
