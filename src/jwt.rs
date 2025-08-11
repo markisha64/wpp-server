@@ -125,7 +125,7 @@ fn extract_token(req: &ServiceRequest) -> Option<String> {
         .get(header::AUTHORIZATION)
         .map(|x| x.to_str().ok())
         .flatten()
-        .map(|x| x.strip_prefix("Bearer"))
+        .map(|x| x.strip_prefix("Bearer "))
         .flatten()
         .map(|s| s.to_string());
 
