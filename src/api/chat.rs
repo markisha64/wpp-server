@@ -136,7 +136,8 @@ pub async fn get_single(
                             "$project": {
                                 "_id": "$user._id",
                                 "last_message_seen_ts": 1,
-                                "display_name": "$user.display_name"
+                                "display_name": "$user.display_name",
+                                "profile_image": "$user.profile_image"
                             }
                         }
                     ]
