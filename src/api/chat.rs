@@ -95,6 +95,7 @@ pub async fn create(
         id: user.id,
         last_message_seen_ts: ts,
         display_name: user.display_name.clone(),
+        profile_image: user.profile_image.clone(),
     });
 
     Ok(safe)
@@ -179,6 +180,7 @@ pub async fn join(
             id: user.id,
             last_message_seen_ts: chat.last_message_ts,
             display_name: user.display_name.clone(),
+            profile_image: user.profile_image.clone(),
         },
     };
 
@@ -228,7 +230,8 @@ pub async fn get_chats(
                             "$project": {
                                 "_id": "$user._id",
                                 "last_message_seen_ts": 1,
-                                "display_name": "$user.display_name"
+                                "display_name": "$user.display_name",
+                                "profile_image": "$user.profile_image"
                             }
                         }
                     ]

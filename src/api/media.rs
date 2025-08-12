@@ -35,11 +35,9 @@ pub async fn upload_file(
 
     let path = format!("./media/{}.{}", uuid, ext);
 
-    req_data
-        .file
-        .file
-        .persist(path)
-        .map_err(|x| ErrorInternalServerError(x))?;
+    async_fs::copy(req_data.file.file.path(), &path)
+        .await
+        .map_err(|err| ErrorInternalServerError(err))?;
 
     Ok(web::Json(UploadFileResponse {
         path: format!("/media/{}.{}", uuid, ext),

@@ -16,4 +16,5 @@ pub struct ChatUserPopulated {
     pub id: ObjectId,
     pub last_message_seen_ts: DateTime,
     pub display_name: String,
+    pub profile_image: String,
 }
