@@ -30,6 +30,8 @@ pub struct Claims {
 
 #[derive(Serialize, Deserialize)]
 pub struct UpdateRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub profile_image: Option<String>,
 }
