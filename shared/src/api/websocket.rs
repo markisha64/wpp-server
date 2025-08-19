@@ -69,6 +69,7 @@ pub enum WebsocketServerResData {
     GetMessages(Vec<ChatMessageSafe>),
 
     /// mediasoup
+    FinishInit,
     SetRoom {
         room_id: String,
         consumer_transport_options: TransportOptions,
@@ -129,5 +130,8 @@ pub enum MediaSoup {
     Consume(String),
     /// ConsumerId
     ConsumerResume(String),
-    SetRoom((ObjectId, RtpCapabilities)),
+
+    /// Setup
+    SetRoom(ObjectId),
+    FinishInit(RtpCapabilities),
 }

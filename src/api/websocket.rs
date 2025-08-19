@@ -26,7 +26,7 @@ use shared::{
         websocket::{
             MediaSoup::{
                 self, ConnectConsumerTransport, ConnectProducerTransport, Consume, ConsumerResume,
-                Produce, SetRoom,
+                FinishInit, Produce, SetRoom,
             },
             TransportOptions, WebsocketClientMessage, WebsocketClientMessageData,
             WebsocketServerMessage, WebsocketServerResData,
@@ -61,7 +61,7 @@ pub struct Transports {
 pub struct ParticipantConnection {
     pub _user_id: String,
     pub room_id: String,
-    pub client_rtp_capabilities: RtpCapabilities,
+    pub client_rtp_capabilities: Option<RtpCapabilities>,
     pub consumers: HashMap<ConsumerId, Consumer>,
     pub producers: Vec<Producer>,
     pub transports: Transports,
@@ -102,7 +102,6 @@ enum Command {
     JoinRoom {
         user_id: String,
         room_id: String,
-        client_rtp_capabilities: RtpCapabilities,
         res_tx: oneshot::Sender<
             anyhow::Result<(
                 ParticipantConnection,
@@ -190,7 +189,6 @@ impl WebsocketServer {
         &mut self,
         user_id: String,
         room_id: String,
-        client_rtp_capabilities: RtpCapabilities,
     ) -> anyhow::Result<(
         ParticipantConnection,
         RtpCapabilitiesFinalized,
@@ -269,7 +267,7 @@ impl WebsocketServer {
             ParticipantConnection {
                 _user_id: user_id,
                 room_id,
-                client_rtp_capabilities,
+                client_rtp_capabilities: None,
                 consumers: HashMap::new(),
                 producers: Vec::new(),
                 transports: Transports {
@@ -367,12 +365,9 @@ impl WebsocketServer {
                 Command::JoinRoom {
                     user_id,
                     room_id,
-                    client_rtp_capabilities,
                     res_tx,
                 } => {
-                    let connection = self
-                        .join_room(user_id, room_id, client_rtp_capabilities)
-                        .await;
+                    let connection = self.join_room(user_id, room_id).await;
                     let _ = res_tx.send(connection);
                 }
 
@@ -461,7 +456,6 @@ impl WebsocketSeverHandle {
         &self,
         user_id: String,
         room_id: String,
-        client_rtp_capabilities: RtpCapabilities,
     ) -> (
         ParticipantConnection,
         RtpCapabilitiesFinalized,
@@ -473,7 +467,6 @@ impl WebsocketSeverHandle {
             .send(Command::JoinRoom {
                 user_id,
                 room_id,
-                client_rtp_capabilities,
                 res_tx,
             })
             .unwrap();
@@ -700,7 +693,7 @@ async fn websocket(
 
                         let mut options = ConsumerOptions::new(
                             ProducerId::from_str(producer_id.as_str())?,
-                            rtp_capabilities,
+                            rtp_capabilities.context("missing client rtp options")?,
                         );
                         options.paused = true;
 
@@ -735,11 +728,11 @@ async fn websocket(
 
                         Ok(WebsocketServerResData::ConsumerResume)
                     }
-                    SetRoom((chat_id, rtp_capabilities)) => {
+                    SetRoom(chat_id) => {
                         // disconnect first probs?
                         current_room_id.replace(chat_id);
                         let (conn, router_rtp_capabilities, producers) = ws_server
-                            .join_room(user_id.to_string(), chat_id.to_string(), rtp_capabilities)
+                            .join_room(user_id.to_string(), chat_id.to_string())
                             .await;
 
                         let consumer = &conn.transports.consumer;
@@ -769,6 +762,13 @@ async fn websocket(
                         participant_connection.replace(conn);
 
                         Ok(r)
+                    }
+                    FinishInit(capabilities) => {
+                        let conn = participant_connection.as_mut().context("missing p conn")?;
+
+                        conn.client_rtp_capabilities.replace(capabilities);
+
+                        Ok(WebsocketServerResData::FinishInit)
                     }
                 }
             };
