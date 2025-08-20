@@ -14,6 +14,7 @@ use crate::{
 };
 
 #[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct TransportOptions {
     /// TransportId
     pub id: String,
