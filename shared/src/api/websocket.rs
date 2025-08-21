@@ -70,7 +70,7 @@ pub enum WebsocketServerResData {
     GetMessages(Vec<ChatMessageSafe>),
 
     /// mediasoup
-    FinishInit,
+    FinishInit(String),
     SetRoom {
         room_id: String,
         consumer_transport_options: TransportOptions,

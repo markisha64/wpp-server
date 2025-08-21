@@ -1,3 +1,5 @@
+use std::env;
+
 use chrono::{Duration, Utc};
 
 use actix_web::{
@@ -7,6 +9,7 @@ use actix_web::{
 use anyhow::Context;
 use bcrypt::{hash, verify};
 use mongodb::bson::{doc, oid::ObjectId};
+use serde::Serialize;
 
 use crate::{jwt::JwtSignService, mongodb::MongoDatabase, redis::RedisHandle};
 use shared::{
@@ -164,6 +167,28 @@ pub async fn get_single(
         .context("Missing user")?;
 
     Ok(user.into())
+}
+
+#[derive(Serialize)]
+struct CFRequest {
+    ttl: i32,
+}
+
+pub async fn get_turn_creds() -> anyhow::Result<String> {
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!(
+            "https://rtc.live.cloudflare.com/v1/turn/keys/{}/credentials/generate-ice-servers",
+            env::var("CF_ID")?
+        ))
+        .header("Authorization", format!("Bearer {}", env::var("CF_TOKEN")?))
+        .json(&CFRequest { ttl: 86400 })
+        .send()
+        .await?
+        .text()
+        .await?;
+
+    Ok(res)
 }
 
 pub fn config(cfg: &mut web::ServiceConfig) {

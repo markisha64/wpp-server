@@ -48,7 +48,7 @@ use tokio::{
 use super::{
     chat::{self},
     message,
-    user::get_single,
+    user::{self, get_single},
 };
 
 type ConnId = Uuid;
@@ -768,7 +768,9 @@ async fn websocket(
 
                         conn.client_rtp_capabilities.replace(capabilities);
 
-                        Ok(WebsocketServerResData::FinishInit)
+                        let turn_creds = user::get_turn_creds().await?;
+
+                        Ok(WebsocketServerResData::FinishInit(turn_creds))
                     }
                 }
             };
