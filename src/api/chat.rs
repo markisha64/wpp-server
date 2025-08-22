@@ -212,11 +212,6 @@ pub async fn get_chats(
                     "as": "users",
                     "pipeline": [
                         {
-                            "$match": {
-                                "user_id": user.id
-                            }
-                        },
-                        {
                             "$lookup": {
                                 "from": "users",
                                 "localField": "user_id",
