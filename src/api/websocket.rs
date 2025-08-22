@@ -295,7 +295,7 @@ impl WebsocketServer {
 
         for recipient in room.clients.keys() {
             if recipient != &user_id {
-                if let Some(connections) = self.connections.get(&user_id) {
+                if let Some(connections) = self.connections.get(recipient) {
                     for (_id, conn) in connections {
                         let _ = conn.send(WebsocketServerMessage::ProducerAdded {
                             participant_id: user_id.clone(),
@@ -693,7 +693,7 @@ async fn websocket(
                             .await
                             .map(|_| {
                                 WebsocketServerResData::MS(
-                                    MediaSoupResponse::ConnectProducerTransport,
+                                    MediaSoupResponse::ConnectConsumerTransport,
                                 )
                             })
                             .map_err(|err| anyhow!(err))
