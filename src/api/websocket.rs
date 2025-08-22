@@ -24,12 +24,12 @@ use shared::{
     api::{
         user::Claims,
         websocket::{
-            MediaSoup::{
+            MediaSoupMessage::{
                 self, ConnectConsumerTransport, ConnectProducerTransport, Consume, ConsumerResume,
                 FinishInit, Produce, SetRoom,
             },
-            TransportOptions, WebsocketClientMessage, WebsocketClientMessageData,
-            WebsocketServerMessage, WebsocketServerResData,
+            MediaSoupResponse, TransportOptions, WebsocketClientMessage,
+            WebsocketClientMessageData, WebsocketServerMessage, WebsocketServerResData,
         },
     },
     models::user::UserSafe,
@@ -643,7 +643,7 @@ async fn websocket(
         let mut msg_stream = pin!(msg_stream_f);
 
         let mut ms_handler =
-            async |media_soup: MediaSoup| -> anyhow::Result<WebsocketServerResData> {
+            async |media_soup: MediaSoupMessage| -> anyhow::Result<WebsocketServerResData> {
                 match media_soup {
                     ConnectProducerTransport(dtls_parameters) => {
                         let conn = participant_connection.as_ref().context("missing p conn")?;
@@ -653,7 +653,11 @@ async fn websocket(
                         transport
                             .connect(WebRtcTransportRemoteParameters { dtls_parameters })
                             .await
-                            .and_then(|_| Ok(WebsocketServerResData::ConnectProducerTransport))
+                            .and_then(|_| {
+                                Ok(WebsocketServerResData::MS(
+                                    MediaSoupResponse::ConnectProducerTransport,
+                                ))
+                            })
                             .map_err(|err| anyhow!(err))
                     }
                     Produce((media_kind, rtp_params)) => {
@@ -673,7 +677,11 @@ async fn websocket(
                         ws_server
                             .producer_added(user_id.to_string(), conn.room_id.clone(), producer)
                             .await
-                            .map(|_| WebsocketServerResData::Produce(id.to_string()))
+                            .map(|_| {
+                                WebsocketServerResData::MS(MediaSoupResponse::Produce(
+                                    id.to_string(),
+                                ))
+                            })
                     }
                     ConnectConsumerTransport(dtls_parameters) => {
                         let conn = participant_connection.as_ref().context("missing p conn")?;
@@ -683,7 +691,11 @@ async fn websocket(
                             .clone()
                             .connect(WebRtcTransportRemoteParameters { dtls_parameters })
                             .await
-                            .map(|_| WebsocketServerResData::ConnectProducerTransport)
+                            .map(|_| {
+                                WebsocketServerResData::MS(
+                                    MediaSoupResponse::ConnectProducerTransport,
+                                )
+                            })
                             .map_err(|err| anyhow!(err))
                     }
                     Consume(producer_id) => {
@@ -705,12 +717,12 @@ async fn websocket(
 
                         conn.consumers.insert(id, consumer);
 
-                        Ok(WebsocketServerResData::Consume {
+                        Ok(WebsocketServerResData::MS(MediaSoupResponse::Consume {
                             id: id.to_string(),
                             producer_id,
                             kind,
                             rtp_parameters,
-                        })
+                        }))
                     }
                     ConsumerResume(consumer_id) => {
                         let conn = participant_connection.as_ref().context("missing p conn")?;
@@ -726,7 +738,9 @@ async fn websocket(
                             .resume()
                             .await;
 
-                        Ok(WebsocketServerResData::ConsumerResume)
+                        Ok(WebsocketServerResData::MS(
+                            MediaSoupResponse::ConsumerResume,
+                        ))
                     }
                     SetRoom(chat_id) => {
                         // disconnect first probs?
@@ -738,7 +752,7 @@ async fn websocket(
                         let consumer = &conn.transports.consumer;
                         let producer = &conn.transports.producer;
 
-                        let r = WebsocketServerResData::SetRoom {
+                        let r = WebsocketServerResData::MS(MediaSoupResponse::SetRoom {
                             room_id: chat_id.to_string(),
                             consumer_transport_options: TransportOptions {
                                 id: consumer.id().to_string(),
@@ -757,7 +771,7 @@ async fn websocket(
                                 .into_iter()
                                 .map(|(k, v)| (k, v.to_string()))
                                 .collect(),
-                        };
+                        });
 
                         participant_connection.replace(conn);
 
@@ -770,7 +784,9 @@ async fn websocket(
 
                         let turn_creds = user::get_turn_creds().await?;
 
-                        Ok(WebsocketServerResData::FinishInit(turn_creds))
+                        Ok(WebsocketServerResData::MS(MediaSoupResponse::FinishInit(
+                            turn_creds,
+                        )))
                     }
                 }
             };

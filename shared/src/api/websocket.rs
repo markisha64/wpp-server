@@ -54,22 +54,7 @@ pub enum WebsocketServerMessage {
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "t", content = "c")]
-pub enum WebsocketServerResData {
-    /// other
-    ProfileUpdate(UserSafe),
-    GetSelf(UserSafe),
-
-    /// chat routes
-    CreateChat(ChatSafe),
-    JoinChat(JoinResponse),
-    GetChats(Vec<ChatSafe>),
-    SetChatRead(DateTime),
-
-    /// message routes
-    NewMessage(ChatMessageSafe),
-    GetMessages(Vec<ChatMessageSafe>),
-
-    /// mediasoup
+pub enum MediaSoupResponse {
     FinishInit(String),
     SetRoom {
         room_id: String,
@@ -92,6 +77,27 @@ pub enum WebsocketServerResData {
         rtp_parameters: RtpParameters,
     },
     ConsumerResume,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(tag = "t", content = "c")]
+pub enum WebsocketServerResData {
+    /// other
+    ProfileUpdate(UserSafe),
+    GetSelf(UserSafe),
+
+    /// chat routes
+    CreateChat(ChatSafe),
+    JoinChat(JoinResponse),
+    GetChats(Vec<ChatSafe>),
+    SetChatRead(DateTime),
+
+    /// message routes
+    NewMessage(ChatMessageSafe),
+    GetMessages(Vec<ChatMessageSafe>),
+
+    /// mediasoup
+    MS(MediaSoupResponse),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -118,12 +124,12 @@ pub enum WebsocketClientMessageData {
     GetMessages(crate::api::message::GetRequest),
 
     /// mediasoup
-    MS(MediaSoup),
+    MS(MediaSoupMessage),
 }
 
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "t", content = "c")]
-pub enum MediaSoup {
+pub enum MediaSoupMessage {
     ConnectProducerTransport(DtlsParameters),
     Produce((MediaKind, RtpParameters)),
     ConnectConsumerTransport(DtlsParameters),
