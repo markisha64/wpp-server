@@ -1,6 +1,7 @@
-use std::{env, pin::pin};
+use std::{env, pin::pin, time::Duration};
 
 use actix_web::{rt::signal, web};
+use anyhow::anyhow;
 use futures_util::{
     future::{select, Either},
     StreamExt,
@@ -9,7 +10,11 @@ use mongodb::bson::oid::ObjectId;
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use shared::api::websocket::WebsocketServerMessage;
-use tokio::sync::mpsc::{self, unbounded_channel};
+use tokio::{
+    sync::mpsc::{self, unbounded_channel},
+    time::sleep,
+};
+use tracing::{error, info, warn};
 
 use crate::api::websocket::WebsocketSeverHandle;
 
@@ -50,6 +55,44 @@ impl RedisHandler {
     }
 
     pub async fn run(mut self) -> anyhow::Result<()> {
+        let mut backoff_duration = Duration::from_secs(1);
+        let max_backoff = Duration::from_secs(60);
+        let mut consecutive_failures = 0;
+        let max_consecutive_failures = 5;
+
+        loop {
+            match self.run_connection().await {
+                Ok(_) => {
+                    info!("Gracefully shutting down RedisHandler");
+                    break;
+                }
+                Err(e) => {
+                    consecutive_failures += 1;
+
+                    if consecutive_failures >= max_consecutive_failures {
+                        error!(
+                            "Too many consecutive Redis connection failures ({}), giving up",
+                            consecutive_failures
+                        );
+                        return Err(e);
+                    }
+
+                    warn!(
+                        "Redis connection failed (attempt {}): {:?}. Retrying in {:?}",
+                        consecutive_failures, e, backoff_duration
+                    );
+
+                    sleep(backoff_duration).await;
+
+                    backoff_duration = std::cmp::min(backoff_duration * 2, max_backoff);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn run_connection(&mut self) -> anyhow::Result<()> {
         let client = redis::Client::open(env::var("REDIS_URL")?)?;
         let (mut sink, mut stream) = client.get_async_pubsub().await?.split();
         let mut con = client.get_multiplexed_async_connection().await?;
@@ -80,16 +123,23 @@ impl RedisHandler {
                     }
                 }
 
-                // close signal
-                Either::Right((Either::Right(_), _)) => {
-                    break;
+                // msg_rx None, server died?
+                Either::Left((None, _)) => {
+                    panic!("msg_rx None, server shutting down")
                 }
 
-                // None from rx?
-                _ => {}
+                // close signal
+                Either::Right((Either::Right((evt, _)), _)) => {
+                    evt.expect("failed to listen for ctrl-c");
+
+                    return Ok(());
+                }
+
+                // None from rx, lost connection?
+                Either::Right((Either::Left((None, _)), _)) => {
+                    return Err(anyhow!("Redis connection lost"));
+                }
             }
         }
-
-        Ok(())
     }
 }

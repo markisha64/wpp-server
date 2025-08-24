@@ -20,6 +20,8 @@ mod redis;
 async fn main() -> std::io::Result<()> {
     dotenv().ok();
 
+    tracing_subscriber::fmt::init();
+
     let worker_manager = web::Data::new(WorkerManager::new());
 
     let mongo_database = MongoDatabase::init()
