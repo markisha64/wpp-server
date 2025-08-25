@@ -1,5 +1,5 @@
 # Stage 1: Build the Rust application
-FROM rust:slim as build
+FROM rust:1.85-bookworm AS build
 
 # Set the working directory inside the container
 WORKDIR /wpp-server
@@ -27,11 +27,11 @@ RUN cargo fetch
 RUN cargo build --release
 
 # Stage 2: Create minimal runtime image
-FROM debian:bullseye-slim
+FROM debian:bookworm-slim
 
 # Install runtime OpenSSL (needed by your binary at runtime)
 RUN apt-get update && apt-get install -y \
-    openssl \
+    libssl3 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
