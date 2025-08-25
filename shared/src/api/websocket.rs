@@ -77,6 +77,8 @@ pub enum MediaSoupResponse {
         rtp_parameters: RtpParameters,
     },
     ConsumerResume,
+
+    LeaveRoom,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -141,4 +143,6 @@ pub enum MediaSoupMessage {
     /// Setup
     SetRoom(ObjectId),
     FinishInit(RtpCapabilities),
+
+    LeaveRoom,
 }

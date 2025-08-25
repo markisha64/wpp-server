@@ -26,7 +26,7 @@ use shared::{
         websocket::{
             MediaSoupMessage::{
                 self, ConnectConsumerTransport, ConnectProducerTransport, Consume, ConsumerResume,
-                FinishInit, Produce, SetRoom,
+                FinishInit, LeaveRoom, Produce, SetRoom,
             },
             MediaSoupResponse, TransportOptions, WebsocketClientMessage,
             WebsocketClientMessageData, WebsocketServerMessage, WebsocketServerResData,
@@ -787,6 +787,23 @@ async fn websocket(
                         Ok(WebsocketServerResData::MS(MediaSoupResponse::FinishInit(
                             turn_creds,
                         )))
+                    }
+                    LeaveRoom => {
+                        let conn = &mut participant_connection;
+
+                        if conn.is_none() {
+                            return Err(anyhow!("missing p conn"));
+                        }
+
+                        if let Some(chat_id) = current_room_id {
+                            let _ = ws_server
+                                .remove_participant(user_id.to_string(), chat_id.to_string())
+                                .await;
+                        }
+
+                        *conn = None;
+
+                        Ok(WebsocketServerResData::MS(MediaSoupResponse::LeaveRoom))
                     }
                 }
             };
