@@ -4,6 +4,17 @@ FROM rust:slim as build
 # Set the working directory inside the container
 WORKDIR /wpp-server
 
+# missing deps
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    build-essential \
+    python3 \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN rustup component add rustfmt
+
 # Copy the rest of the application source code
 COPY src ./src
 COPY shared ./shared
@@ -15,9 +26,15 @@ RUN cargo fetch
 # Build the release version of the application
 RUN cargo build --release
 
-FROM rust:slim
+# Stage 2: Create minimal runtime image
+FROM debian:bullseye-slim
 
+# Install runtime OpenSSL (needed by your binary at runtime)
+RUN apt-get update && apt-get install -y \
+    openssl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
 COPY --from=build /wpp-server/target/release/wpp-server .
 
-# Set the entry point for the container to run the application
 CMD ["./wpp-server"]
