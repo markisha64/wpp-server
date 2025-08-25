@@ -37,4 +37,6 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 COPY --from=build /wpp-server/target/release/wpp-server .
 
+RUN mkdir media
+
 CMD ["./wpp-server"]
