@@ -625,7 +625,6 @@ async fn websocket(
     actix_web::rt::spawn(async move {
         let user_id = user.id;
 
-        let mut current_room_id: Option<ObjectId> = Option::None;
         let mut participant_connection: Option<ParticipantConnection> = Option::None;
 
         let mut last_heartbeat = Instant::now();
@@ -743,8 +742,14 @@ async fn websocket(
                         ))
                     }
                     SetRoom(chat_id) => {
-                        // disconnect first probs?
-                        current_room_id.replace(chat_id);
+                        if let Some(conn) = participant_connection.as_ref() {
+                            if chat_id.to_string() != conn.room_id {
+                                let _ = ws_server
+                                    .remove_participant(user_id.to_string(), conn.room_id.clone())
+                                    .await;
+                            }
+                        }
+
                         let (conn, router_rtp_capabilities, producers) = ws_server
                             .join_room(user_id.to_string(), chat_id.to_string())
                             .await;
@@ -789,19 +794,13 @@ async fn websocket(
                         )))
                     }
                     LeaveRoom => {
-                        let conn = &mut participant_connection;
+                        let conn = participant_connection.as_ref().context("missing p conn")?;
 
-                        if conn.is_none() {
-                            return Err(anyhow!("missing p conn"));
-                        }
+                        let _ = ws_server
+                            .remove_participant(user_id.to_string(), conn.room_id.clone())
+                            .await;
 
-                        if let Some(chat_id) = current_room_id {
-                            let _ = ws_server
-                                .remove_participant(user_id.to_string(), chat_id.to_string())
-                                .await;
-                        }
-
-                        *conn = None;
+                        participant_connection = None;
 
                         Ok(WebsocketServerResData::MS(MediaSoupResponse::LeaveRoom))
                     }
@@ -895,12 +894,10 @@ async fn websocket(
         };
 
         // handle mediasoup disconnect
-        if let Some(_conn) = participant_connection {
-            if let Some(chat_id) = current_room_id {
-                let _ = ws_server
-                    .remove_participant(user_id.to_string(), chat_id.to_string())
-                    .await;
-            }
+        if let Some(conn) = participant_connection {
+            let _ = ws_server
+                .remove_participant(user_id.to_string(), conn.room_id)
+                .await;
         }
 
         ws_server.disconnect(user_id.to_string(), conn_id);
