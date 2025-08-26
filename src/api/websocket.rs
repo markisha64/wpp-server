@@ -1,6 +1,6 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
-    io,
+    env, io,
     net::{IpAddr, Ipv4Addr},
     num::{NonZeroU32, NonZeroU8},
     ops::RangeInclusive,
@@ -203,6 +203,9 @@ impl WebsocketServer {
                     .worker_manger
                     .create_worker({
                         let mut settings = WorkerSettings::default();
+
+                        settings.enable_liburing = false;
+
                         settings.log_level = WorkerLogLevel::Debug;
                         settings.log_tags = vec![
                             WorkerLogTag::Info,
@@ -242,10 +245,12 @@ impl WebsocketServer {
         let transport_options =
             WebRtcTransportOptions::new(WebRtcTransportListenInfos::new(ListenInfo {
                 protocol: Protocol::Udp,
-                ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
-                announced_address: None,
+                ip: IpAddr::V4(Ipv4Addr::from_str(
+                    env::var("HOST").unwrap_or("0.0.0.0".to_string()).as_str(),
+                )?),
+                announced_address: env::var("HOST_URL").ok(),
                 port: None,
-                port_range: Some(RangeInclusive::new(40000, 49999)),
+                port_range: Some(RangeInclusive::new(40000, 41999)),
                 flags: None,
                 send_buffer_size: None,
                 recv_buffer_size: None,
