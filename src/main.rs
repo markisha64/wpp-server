@@ -33,7 +33,8 @@ async fn main() -> std::io::Result<()> {
     let jwt_auth = JwtAuth::<Claims>::init().expect("failed to auth init");
 
     let (ws_server, server_tx) =
-        WebsocketServer::new(mongo_database.to_owned(), worker_manager.to_owned());
+        WebsocketServer::new(mongo_database.to_owned(), worker_manager.to_owned())
+            .expect("Failed to create WS server");
 
     let ws_handle = web::Data::new(server_tx);
 

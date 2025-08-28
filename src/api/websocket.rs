@@ -136,25 +136,33 @@ pub struct WebsocketServer {
 
     #[allow(dead_code)]
     db: web::Data<MongoDatabase>,
+
+    port_min: u16,
+    port_max: u16,
 }
 
 impl WebsocketServer {
     pub fn new(
         db: web::Data<MongoDatabase>,
         worker_manager: web::Data<WorkerManager>,
-    ) -> (Self, WebsocketSeverHandle) {
+    ) -> anyhow::Result<(Self, WebsocketSeverHandle)> {
+        let port_min = env::var("PORT_MIN")?.parse()?;
+        let port_max = env::var("PORT_MAX")?.parse()?;
+
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
 
-        (
+        Ok((
             Self {
                 connections: HashMap::new(),
                 cmd_rx,
                 rooms: HashMap::new(),
                 worker_manger: worker_manager.clone(),
                 db: db.clone(),
+                port_min,
+                port_max,
             },
             WebsocketSeverHandle { cmd_tx, db },
-        )
+        ))
     }
 
     async fn connect(
@@ -250,7 +258,7 @@ impl WebsocketServer {
                 )?),
                 announced_address: env::var("HOST_URL").ok(),
                 port: None,
-                port_range: Some(RangeInclusive::new(40000, 41999)),
+                port_range: Some(RangeInclusive::new(self.port_min, self.port_max)),
                 flags: None,
                 send_buffer_size: None,
                 recv_buffer_size: None,
