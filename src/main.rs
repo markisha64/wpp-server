@@ -22,6 +22,21 @@ async fn main() -> std::io::Result<()> {
 
     tracing_subscriber::fmt::init();
 
+    tracing::info!("PORT: {}", env::var("PORT").unwrap_or("-".to_string()));
+    tracing::info!("HOST: {}", env::var("HOST").unwrap_or("-".to_string()));
+    tracing::info!(
+        "HOST_URL: {}",
+        env::var("HOST_URL").unwrap_or("-".to_string())
+    );
+    tracing::info!(
+        "PORT_MIN: {}",
+        env::var("PORT_MIN").unwrap_or("-".to_string())
+    );
+    tracing::info!(
+        "PORT_MAX: {}",
+        env::var("PORT_MAX").unwrap_or("-".to_string())
+    );
+
     let worker_manager = web::Data::new(WorkerManager::new());
 
     let mongo_database = MongoDatabase::init()
