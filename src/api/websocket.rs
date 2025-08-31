@@ -37,7 +37,7 @@ use shared::{
 };
 use uuid::Uuid;
 
-use crate::{mongodb::MongoDatabase, redis::RedisHandle};
+use crate::{announcer::Announcer, mongodb::MongoDatabase, redis::RedisHandle};
 use tokio::{
     sync::{
         mpsc::{self},
@@ -137,6 +137,8 @@ pub struct WebsocketServer {
     #[allow(dead_code)]
     db: web::Data<MongoDatabase>,
 
+    announcer: web::Data<Announcer>,
+
     port_min: u16,
     port_max: u16,
 }
@@ -145,6 +147,7 @@ impl WebsocketServer {
     pub fn new(
         db: web::Data<MongoDatabase>,
         worker_manager: web::Data<WorkerManager>,
+        announcer: web::Data<Announcer>,
     ) -> anyhow::Result<(Self, WebsocketSeverHandle)> {
         let port_min = env::var("PORT_MIN")?.parse()?;
         let port_max = env::var("PORT_MAX")?.parse()?;
@@ -158,6 +161,7 @@ impl WebsocketServer {
                 rooms: HashMap::new(),
                 worker_manger: worker_manager.clone(),
                 db: db.clone(),
+                announcer: announcer.clone(),
                 port_min,
                 port_max,
             },
@@ -256,7 +260,7 @@ impl WebsocketServer {
                 ip: IpAddr::V4(Ipv4Addr::from_str(
                     env::var("HOST").unwrap_or("0.0.0.0".to_string()).as_str(),
                 )?),
-                announced_address: env::var("HOST_URL").ok(),
+                announced_address: Some(self.announcer.current_ip().await),
                 port: None,
                 port_range: Some(RangeInclusive::new(self.port_min, self.port_max)),
                 flags: None,

@@ -11,6 +11,9 @@ use std::{env, io};
 use actix_web::{http, web, App, HttpServer};
 use tokio::{task::spawn, try_join};
 
+use crate::announcer::Announcer;
+
+mod announcer;
 mod api;
 mod jwt;
 mod mongodb;
@@ -25,10 +28,6 @@ async fn main() -> std::io::Result<()> {
     tracing::info!("PORT: {}", env::var("PORT").unwrap_or("-".to_string()));
     tracing::info!("HOST: {}", env::var("HOST").unwrap_or("-".to_string()));
     tracing::info!(
-        "HOST_URL: {}",
-        env::var("HOST_URL").unwrap_or("-".to_string())
-    );
-    tracing::info!(
         "PORT_MIN: {}",
         env::var("PORT_MIN").unwrap_or("-".to_string())
     );
@@ -39,6 +38,8 @@ async fn main() -> std::io::Result<()> {
 
     let worker_manager = web::Data::new(WorkerManager::new());
 
+    let (announcer, announcer_fut) = Announcer::new().await.expect("failed to start announcer");
+
     let mongo_database = MongoDatabase::init()
         .await
         .expect("Failed to initialize MongoDB client");
@@ -47,9 +48,12 @@ async fn main() -> std::io::Result<()> {
 
     let jwt_auth = JwtAuth::<Claims>::init().expect("failed to auth init");
 
-    let (ws_server, server_tx) =
-        WebsocketServer::new(mongo_database.to_owned(), worker_manager.to_owned())
-            .expect("Failed to create WS server");
+    let (ws_server, server_tx) = WebsocketServer::new(
+        mongo_database.to_owned(),
+        worker_manager.to_owned(),
+        announcer.to_owned(),
+    )
+    .expect("Failed to create WS server");
 
     let ws_handle = web::Data::new(server_tx);
 
@@ -85,6 +89,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(jwt_service.to_owned())
             .app_data(ws_handle.clone())
             .app_data(web::Data::new(redis_handle.clone()))
+            .app_data(announcer.clone())
             .service(web::scope("/user").configure(api::user::config))
             .service(web::scope("/media").configure(api::media::config_wrapper(&jwt_auth)))
             .service(
@@ -98,12 +103,21 @@ async fn main() -> std::io::Result<()> {
 
     println!("binding on {}", addr);
 
-    try_join!(http_fut, async move { ws_fut.await.unwrap() }, async move {
-        redis_fut
-            .await
-            .unwrap()
-            .map_err(|err| io::Error::new(io::ErrorKind::Other, err))
-    })?;
+    try_join!(
+        http_fut,
+        async move { ws_fut.await.unwrap() },
+        async move {
+            redis_fut
+                .await
+                .unwrap()
+                .map_err(|err| io::Error::new(io::ErrorKind::Other, err))
+        },
+        async move {
+            announcer_fut
+                .await
+                .map_err(|err| io::Error::new(io::ErrorKind::Other, err))
+        }
+    )?;
 
     Ok(())
 }
