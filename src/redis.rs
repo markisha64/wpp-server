@@ -16,10 +16,10 @@ use tokio::{
 };
 use tracing::{error, info, warn};
 
-use crate::api::websocket::WebsocketSeverHandle;
+use crate::api::websocket::WebsocketServerHandle;
 
 pub struct RedisHandler {
-    ws_server: web::Data<WebsocketSeverHandle>,
+    ws_server: web::Data<WebsocketServerHandle>,
     msg_rx: mpsc::UnboundedReceiver<RedisSyncMessage>,
 }
 
@@ -48,7 +48,7 @@ pub struct RedisSyncMessage {
 }
 
 impl RedisHandler {
-    pub fn new(ws_server: web::Data<WebsocketSeverHandle>) -> anyhow::Result<(Self, RedisHandle)> {
+    pub fn new(ws_server: web::Data<WebsocketServerHandle>) -> anyhow::Result<(Self, RedisHandle)> {
         let (msg_tx, msg_rx) = unbounded_channel();
 
         Ok((Self { ws_server, msg_rx }, RedisHandle { msg_tx }))

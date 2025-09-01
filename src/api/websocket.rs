@@ -21,6 +21,7 @@ use mediasoup::{
     worker::{WorkerLogLevel, WorkerLogTag},
 };
 use mongodb::bson::oid::ObjectId;
+use serde::{Deserialize, Serialize};
 use shared::{
     api::{
         user::Claims,
@@ -124,6 +125,11 @@ enum Command {
         room_id: String,
         res_tx: oneshot::Sender<anyhow::Result<()>>,
     },
+
+    GetRouter {
+        chat_id: ObjectId,
+        res_tx: oneshot::Sender<anyhow::Result<(Router, Vec<(String, ProducerId)>)>>,
+    },
 }
 
 pub struct WebsocketServer {
@@ -148,7 +154,7 @@ impl WebsocketServer {
         db: web::Data<MongoDatabase>,
         worker_manager: web::Data<WorkerManager>,
         announcer: web::Data<Announcer>,
-    ) -> anyhow::Result<(Self, WebsocketSeverHandle)> {
+    ) -> anyhow::Result<(Self, WebsocketServerHandle)> {
         let port_min = env::var("PORT_MIN")?.parse()?;
         let port_max = env::var("PORT_MAX")?.parse()?;
 
@@ -165,7 +171,7 @@ impl WebsocketServer {
                 port_min,
                 port_max,
             },
-            WebsocketSeverHandle { cmd_tx, db },
+            WebsocketServerHandle { cmd_tx, db },
         ))
     }
 
@@ -407,6 +413,16 @@ impl WebsocketServer {
                     let res = self.remove_participant(user_id, room_id).await;
                     let _ = res_tx.send(res);
                 }
+
+                Command::GetRouter { chat_id, res_tx } => {
+                    let res = self
+                        .rooms
+                        .get(&chat_id.to_string())
+                        .context("missing room")
+                        .map(|x| (x.router.clone(), x.producers()));
+
+                    let _ = res_tx.send(res);
+                }
             }
         }
 
@@ -415,13 +431,13 @@ impl WebsocketServer {
 }
 
 #[derive(Clone)]
-pub struct WebsocketSeverHandle {
+pub struct WebsocketServerHandle {
     cmd_tx: mpsc::UnboundedSender<Command>,
 
     db: web::Data<MongoDatabase>,
 }
 
-impl WebsocketSeverHandle {
+impl WebsocketServerHandle {
     pub async fn connect(
         &self,
         user_id: String,
@@ -525,6 +541,17 @@ impl WebsocketSeverHandle {
 
         res_rx.await.unwrap()
     }
+
+    pub async fn get_router(
+        &self,
+        chat_id: ObjectId,
+    ) -> anyhow::Result<(Router, Vec<(String, ProducerId)>)> {
+        let (res_tx, res_rx) = oneshot::channel();
+
+        self.cmd_tx.send(Command::GetRouter { chat_id, res_tx })?;
+
+        res_rx.await?
+    }
 }
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
@@ -542,7 +569,7 @@ fn to_request_response(
 
 async fn request_handler(
     request: WebsocketClientMessage,
-    ws_server: web::Data<WebsocketSeverHandle>,
+    ws_server: web::Data<WebsocketServerHandle>,
     redis_handle: web::Data<RedisHandle>,
     user: &mut UserSafe,
 ) -> WebsocketServerMessage {
@@ -631,7 +658,7 @@ async fn websocket(
     req: HttpRequest,
     body: web::Payload,
     user: web::ReqData<Claims>,
-    ws_server: web::Data<WebsocketSeverHandle>,
+    ws_server: web::Data<WebsocketServerHandle>,
     redis_handle: web::Data<RedisHandle>,
 ) -> actix_web::Result<impl Responder> {
     let (res, mut session, msg_stream) = actix_ws::handle(&req, body)?;
@@ -926,8 +953,98 @@ async fn websocket(
     Ok(res)
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct PlainSyncRequest {
+    pub chat_id: ObjectId,
+    pub ip: IpAddr,
+    pub port: u16,
+    pub rtcp_port: u16,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct PlainSyncResponse {
+    pub port: u16,
+    pub rtcp_port: u16,
+    pub producers: Vec<(String, ProducerId)>,
+}
+
+pub async fn plain_sync(
+    request: web::Json<PlainSyncRequest>,
+    ws_server: web::Data<WebsocketServerHandle>,
+) -> actix_web::Result<web::Json<PlainSyncResponse>> {
+    let (router, producers) = ws_server
+        .get_router(request.chat_id)
+        .await
+        .map_err(ErrorInternalServerError)?;
+
+    let send_transport_options = PlainTransportOptions::new(ListenInfo {
+        protocol: Protocol::Udp,
+        ip: IpAddr::V4(
+            Ipv4Addr::from_str(env::var("HOST").unwrap_or("0.0.0.0".to_string()).as_str())
+                .map_err(ErrorInternalServerError)?,
+        ),
+        announced_address: None,
+        port: None,
+        port_range: Some(RangeInclusive::new(50000, 50000)),
+        flags: None,
+        send_buffer_size: None,
+        recv_buffer_size: None,
+        expose_internal_ip: false,
+    });
+
+    let send_transport = router
+        .create_plain_transport(send_transport_options)
+        .await
+        .map_err(ErrorInternalServerError)?;
+
+    send_transport
+        .connect(PlainTransportRemoteParameters {
+            ip: Some(request.ip),
+            port: Some(request.port),
+            rtcp_port: Some(request.rtcp_port),
+            srtp_parameters: None,
+        })
+        .await
+        .map_err(ErrorInternalServerError)?;
+
+    let mut receive_transport_options = PlainTransportOptions::new(ListenInfo {
+        protocol: Protocol::Udp,
+        ip: IpAddr::V4(
+            Ipv4Addr::from_str(env::var("HOST").unwrap_or("0.0.0.0".to_string()).as_str())
+                .map_err(ErrorInternalServerError)?,
+        ),
+        announced_address: None,
+        port: None,
+        port_range: Some(RangeInclusive::new(50000, 50000)),
+        flags: None,
+        send_buffer_size: None,
+        recv_buffer_size: None,
+        expose_internal_ip: false,
+    });
+
+    receive_transport_options.comedia = true;
+
+    let receive_transport = router
+        .create_plain_transport(receive_transport_options)
+        .await
+        .map_err(ErrorInternalServerError)?;
+
+    let conn = receive_transport.tuple();
+    let rtcp_conn = receive_transport
+        .rtcp_tuple()
+        .context("failed to get rtcp conn -> check mux disabled")
+        .map_err(ErrorInternalServerError)?;
+
+    Ok(web::Json(PlainSyncResponse {
+        port: conn.local_port(),
+        rtcp_port: rtcp_conn.local_port(),
+        producers,
+    }))
+}
+
 pub fn config(cfg: &mut web::ServiceConfig) {
-    cfg.route("/", web::get().to(websocket));
+    cfg.route("/", web::get().to(websocket))
+        .route("/plainSync", web::post().to(plain_sync));
 }
 
 fn media_codecs() -> Vec<RtpCodecCapability> {
