@@ -38,7 +38,11 @@ use shared::{
 };
 use uuid::Uuid;
 
-use crate::{announcer::Announcer, mongodb::MongoDatabase, redis::RedisHandle};
+use crate::{
+    announcer::Announcer,
+    mongodb::MongoDatabase,
+    redis::{RedisHandle, RedisHandler},
+};
 use tokio::{
     sync::{
         mpsc::{self},
@@ -142,11 +146,16 @@ pub struct WebsocketServer {
 
     #[allow(dead_code)]
     db: web::Data<MongoDatabase>,
-
     announcer: web::Data<Announcer>,
+    redis: web::Data<RedisHandle>,
+
+    server_port: String,
 
     port_min: u16,
     port_max: u16,
+
+    plain_sync_port_min: u16,
+    plain_sync_port_max: u16,
 }
 
 impl WebsocketServer {
@@ -154,25 +163,49 @@ impl WebsocketServer {
         db: web::Data<MongoDatabase>,
         worker_manager: web::Data<WorkerManager>,
         announcer: web::Data<Announcer>,
-    ) -> anyhow::Result<(Self, WebsocketServerHandle)> {
+    ) -> anyhow::Result<(
+        Self,
+        web::Data<WebsocketServerHandle>,
+        RedisHandler,
+        web::Data<RedisHandle>,
+    )> {
         let port_min = env::var("PORT_MIN")?.parse()?;
         let port_max = env::var("PORT_MAX")?.parse()?;
 
+        let plain_sync_port_min = env::var("PLAIN_SYNC_PORT_MIN")
+            .unwrap_or("50000".to_string())
+            .parse()?;
+        let plain_sync_port_max = env::var("PLAIN_SYNC_PORT_MAX")
+            .unwrap_or("51000".to_string())
+            .parse()?;
+
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
 
-        Ok((
-            Self {
-                connections: HashMap::new(),
-                cmd_rx,
-                rooms: HashMap::new(),
-                worker_manger: worker_manager.clone(),
-                db: db.clone(),
-                announcer: announcer.clone(),
-                port_min,
-                port_max,
-            },
-            WebsocketServerHandle { cmd_tx, db },
-        ))
+        let handle = web::Data::new(WebsocketServerHandle {
+            cmd_tx,
+            db: db.clone(),
+        });
+
+        let (redis_handler, handle_d) = RedisHandler::new(handle.clone())?;
+
+        let redis_handle = web::Data::new(handle_d);
+
+        let handler = Self {
+            connections: HashMap::new(),
+            cmd_rx,
+            rooms: HashMap::new(),
+            worker_manger: worker_manager.clone(),
+            db,
+            redis: redis_handle.clone(),
+            announcer: announcer.clone(),
+            server_port: env::var("PORT").unwrap_or("3030".to_string()),
+            port_min,
+            port_max,
+            plain_sync_port_min,
+            plain_sync_port_max,
+        };
+
+        Ok((handler, handle, redis_handler, redis_handle))
     }
 
     async fn connect(
@@ -250,10 +283,100 @@ impl WebsocketServer {
                     .await
                     .map_err(|error| anyhow!("Failed to create router: {error}"))?;
 
+                let my_ip = self.announcer.current_ip();
+
+                let servers = self.redis.get_servers(room_id.clone()).await?;
+
+                let mut receive_transport_options = PlainTransportOptions::new(ListenInfo {
+                    protocol: Protocol::Udp,
+                    ip: IpAddr::V4(Ipv4Addr::from_str(
+                        env::var("HOST").unwrap_or("0.0.0.0".to_string()).as_str(),
+                    )?),
+                    announced_address: Some(format!("{my_ip}:{}", &self.server_port)),
+                    port: None,
+                    port_range: Some(RangeInclusive::new(
+                        self.plain_sync_port_min,
+                        self.plain_sync_port_max,
+                    )),
+                    flags: None,
+                    send_buffer_size: None,
+                    recv_buffer_size: None,
+                    expose_internal_ip: false,
+                });
+
+                receive_transport_options.comedia = true;
+
+                for (ip, port) in servers {
+                    let receive_transport = router
+                        .create_plain_transport(receive_transport_options.clone())
+                        .await?;
+
+                    let conn = receive_transport.tuple();
+                    let rtcp_conn = receive_transport
+                        .rtcp_tuple()
+                        .context("failed to get rtcp conn -> check mux disabled")?;
+
+                    let client = reqwest::Client::new();
+                    let res = client
+                        .post(format!("http://{ip}:{port}/ws/plainSync"))
+                        .json(&PlainSyncRequest {
+                            chat_id: ObjectId::from_str(&room_id.as_str())?,
+                            ip: IpAddr::V4(Ipv4Addr::from_str(my_ip.as_str())?),
+                            port: conn.local_port(),
+                            rtcp_port: rtcp_conn.local_port(),
+                        })
+                        .send()
+                        .await?
+                        .json::<PlainSyncResponse>()
+                        .await?;
+
+                    let send_transport_options = PlainTransportOptions::new(ListenInfo {
+                        protocol: Protocol::Udp,
+                        ip: IpAddr::V4(Ipv4Addr::from_str(
+                            env::var("HOST").unwrap_or("0.0.0.0".to_string()).as_str(),
+                        )?),
+                        announced_address: None,
+                        port: None,
+                        port_range: Some(RangeInclusive::new(50000, 50000)),
+                        flags: None,
+                        send_buffer_size: None,
+                        recv_buffer_size: None,
+                        expose_internal_ip: false,
+                    });
+
+                    let send_transport = router
+                        .create_plain_transport(send_transport_options)
+                        .await?;
+
+                    send_transport
+                        .connect(PlainTransportRemoteParameters {
+                            ip: Some(IpAddr::V4(Ipv4Addr::from_str(ip.as_str())?)),
+                            port: Some(res.port),
+                            rtcp_port: Some(res.rtcp_port),
+                            srtp_parameters: None,
+                        })
+                        .await?;
+
+                    for (participant_id, producer_id) in res.producers {
+                        self.redis
+                            .send_message_to_users(
+                                &vec![ObjectId::from_str(user_id.as_str())?],
+                                WebsocketServerMessage::ProducerAdded {
+                                    participant_id,
+                                    producer_id: producer_id.to_string(),
+                                },
+                            )
+                            .await;
+                    }
+                }
+
                 v.insert(Room {
                     router,
                     clients: HashMap::new(),
                 });
+
+                self.redis
+                    .commit_server(my_ip, self.server_port.clone(), room_id.clone());
             }
             _ => {}
         };
@@ -304,7 +427,7 @@ impl WebsocketServer {
         ))
     }
 
-    pub fn producer_added(
+    pub async fn producer_added(
         &mut self,
         user_id: String,
         room_id: String,
@@ -317,18 +440,22 @@ impl WebsocketServer {
 
         producers.push(producer);
 
-        for recipient in room.clients.keys() {
-            if recipient != &user_id {
-                if let Some(connections) = self.connections.get(recipient) {
-                    for (_id, conn) in connections {
-                        let _ = conn.send(WebsocketServerMessage::ProducerAdded {
-                            participant_id: user_id.clone(),
-                            producer_id: producer_id.to_string(),
-                        });
-                    }
-                }
-            }
-        }
+        let user_ids: Vec<_> = room
+            .clients
+            .keys()
+            .filter(|x| *x != &user_id)
+            .map(|x| ObjectId::from_str(x.as_str()))
+            .collect::<Result<_, _>>()?;
+
+        self.redis
+            .send_message_to_users(
+                &user_ids,
+                WebsocketServerMessage::ProducerAdded {
+                    participant_id: user_id.clone(),
+                    producer_id: producer_id.to_string(),
+                },
+            )
+            .await;
 
         Ok(())
     }
@@ -342,20 +469,33 @@ impl WebsocketServer {
 
         let producers = room.clients.remove(&user_id);
 
-        // this is disgusting haha
         if let Some(producers) = producers {
+            let user_ids: Vec<_> = room
+                .clients
+                .keys()
+                .map(|x| ObjectId::from_str(x.as_str()))
+                .collect::<Result<_, _>>()?;
+
             for producer in producers {
-                for receiver in room.clients.keys() {
-                    if let Some(conns) = self.connections.get(receiver) {
-                        for (_, connection) in conns {
-                            let _ = connection.send(WebsocketServerMessage::ProducerRemove {
-                                participant_id: user_id.clone(),
-                                producer_id: producer.id().to_string(),
-                            });
-                        }
-                    }
-                }
+                self.redis
+                    .send_message_to_users(
+                        &user_ids,
+                        WebsocketServerMessage::ProducerRemove {
+                            participant_id: user_id.clone(),
+                            producer_id: producer.id().to_string(),
+                        },
+                    )
+                    .await
             }
+        }
+
+        // to trigger drop
+        if room.clients.is_empty() {
+            let my_ip = self.announcer.current_ip();
+
+            self.rooms.remove(&room_id);
+            self.redis
+                .remove_server(my_ip, self.server_port.clone(), room_id);
         }
 
         Ok(())
@@ -401,7 +541,7 @@ impl WebsocketServer {
                     producer,
                     res_tx,
                 } => {
-                    let res = self.producer_added(user_id, room_id, producer);
+                    let res = self.producer_added(user_id, room_id, producer).await;
                     let _ = res_tx.send(res);
                 }
 
@@ -977,6 +1117,15 @@ pub async fn plain_sync(
         .await
         .map_err(ErrorInternalServerError)?;
 
+    let plain_sync_port_min = env::var("PLAIN_SYNC_PORT_MIN")
+        .unwrap_or("50000".to_string())
+        .parse()
+        .map_err(ErrorInternalServerError)?;
+    let plain_sync_port_max = env::var("PLAIN_SYNC_PORT_MAX")
+        .unwrap_or("51000".to_string())
+        .parse()
+        .map_err(ErrorInternalServerError)?;
+
     let send_transport_options = PlainTransportOptions::new(ListenInfo {
         protocol: Protocol::Udp,
         ip: IpAddr::V4(
@@ -985,7 +1134,10 @@ pub async fn plain_sync(
         ),
         announced_address: None,
         port: None,
-        port_range: Some(RangeInclusive::new(50000, 50000)),
+        port_range: Some(RangeInclusive::new(
+            plain_sync_port_min,
+            plain_sync_port_max,
+        )),
         flags: None,
         send_buffer_size: None,
         recv_buffer_size: None,
@@ -1015,7 +1167,10 @@ pub async fn plain_sync(
         ),
         announced_address: None,
         port: None,
-        port_range: Some(RangeInclusive::new(50000, 50000)),
+        port_range: Some(RangeInclusive::new(
+            plain_sync_port_min,
+            plain_sync_port_max,
+        )),
         flags: None,
         send_buffer_size: None,
         recv_buffer_size: None,

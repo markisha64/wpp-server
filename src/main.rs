@@ -4,7 +4,6 @@ use dotenv::dotenv;
 use jwt::{JwtAuth, JwtSignService};
 use mediasoup::prelude::WorkerManager;
 use mongodb::MongoDatabase;
-use redis::RedisHandler;
 use shared::api::user::Claims;
 use std::{env, io};
 
@@ -48,17 +47,12 @@ async fn main() -> std::io::Result<()> {
 
     let jwt_auth = JwtAuth::<Claims>::init().expect("failed to auth init");
 
-    let (ws_server, server_tx) = WebsocketServer::new(
+    let (ws_server, ws_handle, redis_handler, redis_handle) = WebsocketServer::new(
         mongo_database.to_owned(),
         worker_manager.to_owned(),
         announcer.to_owned(),
     )
     .expect("Failed to create WS server");
-
-    let ws_handle = web::Data::new(server_tx);
-
-    let (redis_handler, redis_handle) =
-        RedisHandler::new(ws_handle.clone()).expect("Failed to create redis handler");
 
     let ws_fut = spawn(ws_server.run());
 
@@ -88,7 +82,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(mongo_database.to_owned())
             .app_data(jwt_service.to_owned())
             .app_data(ws_handle.clone())
-            .app_data(web::Data::new(redis_handle.clone()))
+            .app_data(redis_handle.clone())
             .app_data(announcer.clone())
             .service(web::scope("/user").configure(api::user::config))
             .service(web::scope("/media").configure(api::media::config_wrapper(&jwt_auth)))

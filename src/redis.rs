@@ -11,7 +11,10 @@ use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use shared::api::websocket::WebsocketServerMessage;
 use tokio::{
-    sync::mpsc::{self, unbounded_channel},
+    sync::{
+        mpsc::{self, unbounded_channel},
+        oneshot,
+    },
     time::sleep,
 };
 use tracing::{error, info, warn};
@@ -20,12 +23,12 @@ use crate::api::websocket::WebsocketServerHandle;
 
 pub struct RedisHandler {
     ws_server: web::Data<WebsocketServerHandle>,
-    msg_rx: mpsc::UnboundedReceiver<RedisSyncMessage>,
+    msg_rx: mpsc::UnboundedReceiver<RedisCommand>,
 }
 
 #[derive(Clone)]
 pub struct RedisHandle {
-    msg_tx: mpsc::UnboundedSender<RedisSyncMessage>,
+    msg_tx: mpsc::UnboundedSender<RedisCommand>,
 }
 
 impl RedisHandle {
@@ -34,11 +37,50 @@ impl RedisHandle {
         user_ids: &Vec<ObjectId>,
         message: WebsocketServerMessage,
     ) {
-        let _ = self.msg_tx.send(RedisSyncMessage {
+        let _ = self.msg_tx.send(RedisCommand::Send(RedisSyncMessage {
             user_ids: user_ids.clone(),
             message,
-        });
+        }));
     }
+
+    pub fn commit_server(&self, ip: String, port: String, room_id: String) {
+        let _ = self
+            .msg_tx
+            .send(RedisCommand::CommitServer { ip, room_id, port });
+    }
+
+    pub fn remove_server(&self, ip: String, port: String, room_id: String) {
+        let _ = self
+            .msg_tx
+            .send(RedisCommand::RemoveServer { ip, room_id, port });
+    }
+
+    pub async fn get_servers(&self, room_id: String) -> anyhow::Result<Vec<(String, String)>> {
+        let (res_tx, res_rx) = oneshot::channel();
+
+        self.msg_tx
+            .send(RedisCommand::GetServers { room_id, res_tx })?;
+
+        Ok(res_rx.await?)
+    }
+}
+
+pub enum RedisCommand {
+    Send(RedisSyncMessage),
+    GetServers {
+        room_id: String,
+        res_tx: oneshot::Sender<Vec<(String, String)>>,
+    },
+    CommitServer {
+        ip: String,
+        room_id: String,
+        port: String,
+    },
+    RemoveServer {
+        ip: String,
+        room_id: String,
+        port: String,
+    },
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -107,21 +149,44 @@ impl RedisHandler {
             let s1 = select(rx, close);
 
             match select(msg_rx, s1).await {
-                Either::Right((Either::Left((Some(msg), _)), _)) => {
-                    if let Ok(payload) = msg.get_payload::<String>() {
-                        if let Ok(msg) = serde_json::from_str::<RedisSyncMessage>(&payload) {
-                            self.ws_server
-                                .send_message_to_users(&msg.user_ids, msg.message.clone())
-                                .await;
+                Either::Right((Either::Left((Some(msg), _)), _)) => match msg.get_channel_name() {
+                    "sync_messages" => {
+                        if let Ok(payload) = msg.get_payload::<String>() {
+                            if let Ok(msg) = serde_json::from_str::<RedisSyncMessage>(&payload) {
+                                self.ws_server
+                                    .send_message_to_users(&msg.user_ids, msg.message.clone())
+                                    .await;
+                            }
                         }
                     }
-                }
 
-                Either::Left((Some(msg), _)) => {
-                    if let Ok(payload) = serde_json::to_string(&msg) {
-                        let _ = con.publish::<_, _, String>("sync_messages", payload).await;
+                    cname => {
+                        error!("invalid message \"{cname}\": {:?}", msg);
                     }
-                }
+                },
+
+                Either::Left((Some(command), _)) => match command {
+                    RedisCommand::Send(msg) => {
+                        if let Ok(payload) = serde_json::to_string(&msg) {
+                            let _ = con.publish::<_, _, String>("sync_messages", payload).await;
+                        }
+                    }
+
+                    RedisCommand::CommitServer { ip, room_id, port } => {
+                        let _ = con.sadd::<_, _, i32>(room_id, (ip, port)).await;
+                    }
+
+                    RedisCommand::RemoveServer { ip, room_id, port } => {
+                        let _ = con.srem::<_, _, i32>(room_id, (ip, port)).await;
+                    }
+
+                    RedisCommand::GetServers { room_id, res_tx } => {
+                        if let Ok(members) = con.smembers::<_, Vec<(String, String)>>(room_id).await
+                        {
+                            let _ = res_tx.send(members);
+                        }
+                    }
+                },
 
                 // msg_rx None, server died?
                 Either::Left((None, _)) => {
