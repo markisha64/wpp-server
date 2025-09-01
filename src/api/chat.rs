@@ -161,7 +161,7 @@ pub async fn join(
 ) -> anyhow::Result<JoinResponse> {
     let chat = get_single(db.clone(), chat_id).await?;
 
-    if chat.users.iter().any(|x| x.id == user.id) {
+    if chat.users.iter().find(|x| x.id == user.id).is_some() {
         return Ok(JoinResponse {});
     }
 

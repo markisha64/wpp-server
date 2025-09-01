@@ -101,13 +101,22 @@ async fn main() -> std::io::Result<()> {
     .bind(&addr)?
     .run();
 
-    println!("binding on {addr}");
+    println!("binding on {}", addr);
 
     try_join!(
         http_fut,
         async move { ws_fut.await.unwrap() },
-        async move { redis_fut.await.unwrap().map_err(io::Error::other) },
-        async move { announcer_fut.await.map_err(io::Error::other) }
+        async move {
+            redis_fut
+                .await
+                .unwrap()
+                .map_err(|err| io::Error::new(io::ErrorKind::Other, err))
+        },
+        async move {
+            announcer_fut
+                .await
+                .map_err(|err| io::Error::new(io::ErrorKind::Other, err))
+        }
     )?;
 
     Ok(())

@@ -34,7 +34,7 @@ pub enum WebsocketServerMessage {
     },
     RequestResponse {
         id: Uuid,
-        data: Result<Box<WebsocketServerResData>, String>,
+        data: Result<WebsocketServerResData, String>,
     },
     SetChatRead {
         chat_id: ObjectId,
@@ -99,7 +99,7 @@ pub enum WebsocketServerResData {
     GetMessages(Vec<ChatMessageSafe>),
 
     /// mediasoup
-    MS(Box<MediaSoupResponse>),
+    MS(MediaSoupResponse),
 }
 
 #[derive(Serialize, Deserialize)]

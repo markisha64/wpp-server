@@ -31,7 +31,7 @@ pub async fn create(
 
     let chat = get_single(db.clone(), request.chat_id).await?;
 
-    if chat.users.iter().any(|x| x.id == user.id) {
+    if chat.users.iter().find(|x| x.id == user.id).is_none() {
         return Err(anyhow!("chat not found"));
     }
 
@@ -86,7 +86,7 @@ pub async fn get_messages(
     let collection = db.database.collection::<ChatMessageSafe>("chat_messages");
 
     let chat = get_single(db.clone(), request.chat_id).await?;
-    if chat.users.iter().any(|x| x.id == user.id) {
+    if chat.users.iter().find(|x| x.id == user.id).is_none() {
         return Err(anyhow!("chat not found"));
     }
 

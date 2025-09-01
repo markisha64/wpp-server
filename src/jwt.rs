@@ -123,11 +123,16 @@ fn extract_token(req: &ServiceRequest) -> Option<String> {
     let htoken = req
         .headers()
         .get(header::AUTHORIZATION)
-        .and_then(|x| x.to_str().ok())
-        .and_then(|x| x.strip_prefix("Bearer "))
+        .map(|x| x.to_str().ok())
+        .flatten()
+        .map(|x| x.strip_prefix("Bearer "))
+        .flatten()
         .map(|s| s.to_string());
 
     let query = Query::<HashMap<String, String>>::from_query(req.query_string()).ok();
 
-    query.and_then(|x| x.get("jwt_token").cloned()).or(htoken)
+    query
+        .map(|x| x.get("jwt_token").cloned())
+        .flatten()
+        .or(htoken)
 }

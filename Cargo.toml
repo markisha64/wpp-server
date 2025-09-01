@@ -36,26 +36,3 @@ rustflags = ["-Z", "threads=8"]
 members = [
   "shared"
 ]
-
-[package.metadata.clippy]
-# Treat these lints as warnings project-wide
-warn = [
-    "clippy::needless_async",
-    "clippy::unwrap_used",
-    "clippy::panic",
-    "clippy::dbg_macro",
-    "clippy::print_stdout",
-    "clippy::todo",
-    "clippy::unimplemented",
-    "clippy::map_clone",
-    "clippy::inefficient_to_string",
-    "clippy::or_fun_call",
-    "clippy::map_entry",
-    "clippy::needless_borrow",
-    "clippy::redundant_clone",
-    "clippy::match_bool",
-    "clippy::manual_strip",
-    "clippy::missing_panics_doc",
-    "clippy::missing_errors_doc",
-    "clippy::unwrap_in_result"
-]
