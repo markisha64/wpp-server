@@ -305,6 +305,7 @@ impl WebsocketServer {
                 });
 
                 receive_transport_options.comedia = true;
+                receive_transport_options.rtcp_mux = false;
 
                 for (ip, port) in servers {
                     let receive_transport = router
@@ -645,7 +646,12 @@ impl WebsocketServerHandle {
             })
             .unwrap();
 
-        res_rx.await.unwrap().unwrap()
+        let rv = res_rx.await;
+
+        dbg!(rv.as_ref().err());
+        dbg!(rv.as_ref().map(|x| x.as_ref().err()));
+
+        rv.unwrap().unwrap()
     }
 
     pub async fn producer_added(
@@ -1178,6 +1184,7 @@ pub async fn plain_sync(
     });
 
     receive_transport_options.comedia = true;
+    receive_transport_options.rtcp_mux = false;
 
     let receive_transport = router
         .create_plain_transport(receive_transport_options)

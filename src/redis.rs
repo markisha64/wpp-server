@@ -173,17 +173,22 @@ impl RedisHandler {
                     }
 
                     RedisCommand::CommitServer { ip, room_id, port } => {
-                        let _ = con.sadd::<_, _, i32>(room_id, (ip, port)).await;
+                        let _ = con.sadd::<_, _, i32>(room_id, format!("{ip}:{port}")).await;
                     }
 
                     RedisCommand::RemoveServer { ip, room_id, port } => {
-                        let _ = con.srem::<_, _, i32>(room_id, (ip, port)).await;
+                        let _ = con.srem::<_, _, i32>(room_id, format!("{ip}:{port}")).await;
                     }
 
                     RedisCommand::GetServers { room_id, res_tx } => {
-                        if let Ok(members) = con.smembers::<_, Vec<(String, String)>>(room_id).await
-                        {
-                            let _ = res_tx.send(members);
+                        if let Ok(members) = con.smembers::<_, Vec<String>>(room_id).await {
+                            let _ = res_tx.send(
+                                members
+                                    .iter()
+                                    .map(|x| x.split_once(":").unwrap())
+                                    .map(|(a, b)| (a.to_string(), b.to_string()))
+                                    .collect(),
+                            );
                         }
                     }
                 },
