@@ -260,7 +260,7 @@ impl WebsocketServer {
                 ip: IpAddr::V4(Ipv4Addr::from_str(
                     env::var("HOST").unwrap_or("0.0.0.0".to_string()).as_str(),
                 )?),
-                announced_address: Some(self.announcer.current_ip().await),
+                announced_address: Some(self.announcer.current_ip()),
                 port: None,
                 port_range: Some(RangeInclusive::new(self.port_min, self.port_max)),
                 flags: None,

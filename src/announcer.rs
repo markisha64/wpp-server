@@ -49,7 +49,7 @@ impl Announcer {
         Ok((web::Data::new(Announcer { rx }), fut))
     }
 
-    pub async fn current_ip(&self) -> String {
+    pub fn current_ip(&self) -> String {
         self.rx.borrow().clone()
     }
 }
