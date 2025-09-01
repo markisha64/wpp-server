@@ -40,7 +40,7 @@ async fn register(
     let password = request.password.clone();
     let hash = web::block(|| hash(password, 10))
         .await?
-        .map_err(|err| error::ErrorInternalServerError(err))?;
+        .map_err(error::ErrorInternalServerError)?;
 
     let mut user = models::user::User {
         id: None,
@@ -53,7 +53,7 @@ async fn register(
     let inserted = collection
         .insert_one(&user)
         .await
-        .map_err(|err| error::ErrorInternalServerError(err))?;
+        .map_err(error::ErrorInternalServerError)?;
 
     user.id = inserted.inserted_id.as_object_id();
 
@@ -64,9 +64,7 @@ async fn register(
         exp: (Utc::now() + Duration::days(1)).timestamp() as usize,
     };
 
-    let token = jwt
-        .sign(&claims)
-        .map_err(|err| error::ErrorInternalServerError(err))?;
+    let token = jwt.sign(&claims).map_err(error::ErrorInternalServerError)?;
 
     Ok(web::Json(AuthResponse { token, user }))
 }
@@ -83,16 +81,16 @@ async fn login(
             "email": &request.email
         })
         .await
-        .map_err(|err| error::ErrorInternalServerError(err))?
+        .map_err(error::ErrorInternalServerError)?
         .context("incorrect email/password")
-        .map_err(|err| error::ErrorNotFound(err))?;
+        .map_err(error::ErrorNotFound)?;
 
     let password = request.password.clone();
     let password_hash = user.password_hash.clone();
 
     let correct = web::block(move || verify(password, &password_hash))
         .await?
-        .map_err(|err| error::ErrorInternalServerError(err))?;
+        .map_err(error::ErrorInternalServerError)?;
 
     if !correct {
         return Err(error::ErrorNotFound("incorrect email/password"));
@@ -105,9 +103,7 @@ async fn login(
         exp: (Utc::now() + Duration::days(1)).timestamp() as usize,
     };
 
-    let token = jwt
-        .sign(&claims)
-        .map_err(|err| error::ErrorInternalServerError(err))?;
+    let token = jwt.sign(&claims).map_err(error::ErrorInternalServerError)?;
 
     Ok(web::Json(AuthResponse { user, token }))
 }

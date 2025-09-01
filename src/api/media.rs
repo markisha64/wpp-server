@@ -23,24 +23,24 @@ pub async fn upload_file(
         .file
         .file_name
         .context("missing file name")
-        .map_err(|err| ErrorInternalServerError(err))?;
+        .map_err(ErrorInternalServerError)?;
 
     let ext = Path::new(&file_name)
         .extension()
         .context("missing ext")
-        .map_err(|err| ErrorInternalServerError(err))?
+        .map_err(ErrorInternalServerError)?
         .to_str()
         .context("failed to convert to str")
-        .map_err(|err| ErrorInternalServerError(err))?;
+        .map_err(ErrorInternalServerError)?;
 
-    let path = format!("./media/{}.{}", uuid, ext);
+    let path = format!("./media/{uuid}.{ext}");
 
     async_fs::copy(req_data.file.file.path(), &path)
         .await
-        .map_err(|err| ErrorInternalServerError(err))?;
+        .map_err(ErrorInternalServerError)?;
 
     Ok(web::Json(UploadFileResponse {
-        path: format!("/media/{}.{}", uuid, ext),
+        path: format!("/media/{uuid}.{ext}"),
     }))
 }
 

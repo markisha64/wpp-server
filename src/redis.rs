@@ -35,7 +35,7 @@ impl RedisHandle {
         message: WebsocketServerMessage,
     ) {
         let _ = self.msg_tx.send(RedisSyncMessage {
-            user_ids: user_ids.clone(),
+            user_ids: user_ids.to_owned(),
             message,
         });
     }

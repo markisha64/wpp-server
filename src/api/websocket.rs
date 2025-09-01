@@ -85,7 +85,7 @@ impl Room {
 enum Command {
     Connect {
         user_id: String,
-        conn_tx: mpsc::UnboundedSender<WebsocketServerMessage>,
+        conn_tx: mpsc::UnboundedSender<Box<WebsocketServerMessage>>,
         res_tx: oneshot::Sender<ConnId>,
     },
 
@@ -95,7 +95,7 @@ enum Command {
     },
 
     Message {
-        msg: WebsocketServerMessage,
+        msg: Box<WebsocketServerMessage>,
         user_id: String,
         res_tx: oneshot::Sender<()>,
     },
@@ -103,6 +103,7 @@ enum Command {
     JoinRoom {
         user_id: String,
         room_id: String,
+        #[allow(clippy::type_complexity)]
         res_tx: oneshot::Sender<
             anyhow::Result<(
                 ParticipantConnection,
@@ -127,7 +128,7 @@ enum Command {
 }
 
 pub struct WebsocketServer {
-    connections: HashMap<String, HashMap<Uuid, mpsc::UnboundedSender<WebsocketServerMessage>>>,
+    connections: HashMap<String, HashMap<Uuid, mpsc::UnboundedSender<Box<WebsocketServerMessage>>>>,
     rooms: HashMap<String, Room>,
 
     cmd_rx: mpsc::UnboundedReceiver<Command>,
@@ -172,14 +173,11 @@ impl WebsocketServer {
     async fn connect(
         &mut self,
         user_id: String,
-        tx: mpsc::UnboundedSender<WebsocketServerMessage>,
+        tx: mpsc::UnboundedSender<Box<WebsocketServerMessage>>,
     ) -> ConnId {
         let id = Uuid::new_v4();
 
-        self.connections
-            .entry(user_id)
-            .or_insert_with(HashMap::new)
-            .insert(id, tx);
+        self.connections.entry(user_id).or_default().insert(id, tx);
 
         id
     }
@@ -190,9 +188,9 @@ impl WebsocketServer {
         }
     }
 
-    async fn send_message(&self, user_id: String, msg: WebsocketServerMessage) {
+    async fn send_message(&self, user_id: String, msg: Box<WebsocketServerMessage>) {
         if let Some(conns) = self.connections.get(&user_id) {
-            for (_, connection) in conns {
+            for connection in conns.values() {
                 let _ = connection.send(msg.clone());
             }
         }
@@ -209,48 +207,45 @@ impl WebsocketServer {
     )> {
         let entry = self.rooms.entry(room_id.clone());
 
-        match entry {
-            Entry::Vacant(v) => {
-                let worker = self
-                    .worker_manger
-                    .create_worker({
-                        let mut settings = WorkerSettings::default();
+        if let Entry::Vacant(v) = entry {
+            let worker = self
+                .worker_manger
+                .create_worker({
+                    let mut settings = WorkerSettings::default();
 
-                        settings.enable_liburing = false;
+                    settings.enable_liburing = false;
 
-                        settings.log_level = WorkerLogLevel::Debug;
-                        settings.log_tags = vec![
-                            WorkerLogTag::Info,
-                            WorkerLogTag::Ice,
-                            WorkerLogTag::Dtls,
-                            WorkerLogTag::Rtp,
-                            WorkerLogTag::Srtp,
-                            WorkerLogTag::Rtcp,
-                            WorkerLogTag::Rtx,
-                            WorkerLogTag::Bwe,
-                            WorkerLogTag::Score,
-                            WorkerLogTag::Simulcast,
-                            WorkerLogTag::Svc,
-                            WorkerLogTag::Sctp,
-                            WorkerLogTag::Message,
-                        ];
+                    settings.log_level = WorkerLogLevel::Debug;
+                    settings.log_tags = vec![
+                        WorkerLogTag::Info,
+                        WorkerLogTag::Ice,
+                        WorkerLogTag::Dtls,
+                        WorkerLogTag::Rtp,
+                        WorkerLogTag::Srtp,
+                        WorkerLogTag::Rtcp,
+                        WorkerLogTag::Rtx,
+                        WorkerLogTag::Bwe,
+                        WorkerLogTag::Score,
+                        WorkerLogTag::Simulcast,
+                        WorkerLogTag::Svc,
+                        WorkerLogTag::Sctp,
+                        WorkerLogTag::Message,
+                    ];
 
-                        settings
-                    })
-                    .await
-                    .map_err(|error| anyhow!("Failed to create worker: {error}"))?;
-                let router = worker
-                    .create_router(RouterOptions::new(media_codecs()))
-                    .await
-                    .map_err(|error| anyhow!("Failed to create router: {error}"))?;
+                    settings
+                })
+                .await
+                .map_err(|error| anyhow!("Failed to create worker: {error}"))?;
+            let router = worker
+                .create_router(RouterOptions::new(media_codecs()))
+                .await
+                .map_err(|error| anyhow!("Failed to create router: {error}"))?;
 
-                v.insert(Room {
-                    router,
-                    clients: HashMap::new(),
-                });
-            }
-            _ => {}
-        };
+            v.insert(Room {
+                router,
+                clients: HashMap::new(),
+            });
+        }
 
         let room = self.rooms.get_mut(&room_id).unwrap();
 
@@ -314,11 +309,11 @@ impl WebsocketServer {
         for recipient in room.clients.keys() {
             if recipient != &user_id {
                 if let Some(connections) = self.connections.get(recipient) {
-                    for (_id, conn) in connections {
-                        let _ = conn.send(WebsocketServerMessage::ProducerAdded {
+                    for conn in connections.values() {
+                        let _ = conn.send(Box::new(WebsocketServerMessage::ProducerAdded {
                             participant_id: user_id.clone(),
                             producer_id: producer_id.to_string(),
-                        });
+                        }));
                     }
                 }
             }
@@ -341,11 +336,12 @@ impl WebsocketServer {
             for producer in producers {
                 for receiver in room.clients.keys() {
                     if let Some(conns) = self.connections.get(receiver) {
-                        for (_, connection) in conns {
-                            let _ = connection.send(WebsocketServerMessage::ProducerRemove {
-                                participant_id: user_id.clone(),
-                                producer_id: producer.id().to_string(),
-                            });
+                        for connection in conns.values() {
+                            let _ =
+                                connection.send(Box::new(WebsocketServerMessage::ProducerRemove {
+                                    participant_id: user_id.clone(),
+                                    producer_id: producer.id().to_string(),
+                                }));
                         }
                     }
                 }
@@ -425,7 +421,7 @@ impl WebsocketSeverHandle {
     pub async fn connect(
         &self,
         user_id: String,
-        conn_tx: mpsc::UnboundedSender<WebsocketServerMessage>,
+        conn_tx: mpsc::UnboundedSender<Box<WebsocketServerMessage>>,
     ) -> ConnId {
         let (res_tx, res_rx) = oneshot::channel();
 
@@ -446,7 +442,7 @@ impl WebsocketSeverHandle {
             .unwrap();
     }
 
-    pub async fn send_message(&self, user_id: String, msg: WebsocketServerMessage) {
+    pub async fn send_message(&self, user_id: String, msg: Box<WebsocketServerMessage>) {
         let (res_tx, res_rx) = oneshot::channel();
 
         self.cmd_tx
@@ -466,7 +462,8 @@ impl WebsocketSeverHandle {
         msg: WebsocketServerMessage,
     ) {
         for user_id in user_ids {
-            self.send_message(user_id.to_string(), msg.clone()).await;
+            self.send_message(user_id.to_string(), Box::new(msg.clone()))
+                .await;
         }
     }
 
@@ -531,12 +528,12 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn to_request_response(
-    res: anyhow::Result<WebsocketServerResData>,
+    res: anyhow::Result<Box<WebsocketServerResData>>,
     id: Uuid,
 ) -> WebsocketServerMessage {
     WebsocketServerMessage::RequestResponse {
         id,
-        data: res.map_err(|err| format!("{}", err)),
+        data: res.map_err(|err| format!("{err}")),
     }
 }
 
@@ -552,7 +549,8 @@ async fn request_handler(
         WebsocketClientMessageData::CreateChat(req_data) => {
             let req_res = chat::create(ws_server.db.clone(), user, req_data)
                 .await
-                .map(|data| WebsocketServerResData::CreateChat(data));
+                .map(WebsocketServerResData::CreateChat)
+                .map(Box::new);
 
             to_request_response(req_res, request.id)
         }
@@ -560,7 +558,8 @@ async fn request_handler(
         WebsocketClientMessageData::JoinChat(id) => {
             let req_res = chat::join(ws_server.db.clone(), user, redis_handle.clone(), id)
                 .await
-                .map(|data| WebsocketServerResData::JoinChat(data));
+                .map(WebsocketServerResData::JoinChat)
+                .map(Box::new);
 
             to_request_response(req_res, request.id)
         }
@@ -568,7 +567,8 @@ async fn request_handler(
         WebsocketClientMessageData::GetChats => {
             let req_res = chat::get_chats(ws_server.db.clone(), user)
                 .await
-                .map(|data| WebsocketServerResData::GetChats(data));
+                .map(WebsocketServerResData::GetChats)
+                .map(Box::new);
 
             to_request_response(req_res, request.id)
         }
@@ -576,24 +576,27 @@ async fn request_handler(
         WebsocketClientMessageData::SetChatRead(id) => {
             let req_res = chat::set_chat_read(ws_server.db.clone(), user, redis_handle.clone(), id)
                 .await
-                .map(|data| WebsocketServerResData::SetChatRead(data));
+                .map(WebsocketServerResData::SetChatRead)
+                .map(Box::new);
 
             to_request_response(req_res, request.id)
         }
 
         WebsocketClientMessageData::NewMessage(req_data) => {
             let req_res =
-                message::create(ws_server.db.clone(), &user, redis_handle.clone(), req_data)
+                message::create(ws_server.db.clone(), user, redis_handle.clone(), req_data)
                     .await
-                    .map(|data| WebsocketServerResData::NewMessage(data));
+                    .map(WebsocketServerResData::NewMessage)
+                    .map(Box::new);
 
             to_request_response(req_res, request.id)
         }
 
         WebsocketClientMessageData::GetMessages(req_data) => {
-            let req_res = message::get_messages(ws_server.db.clone(), &user, req_data)
+            let req_res = message::get_messages(ws_server.db.clone(), user, req_data)
                 .await
-                .map(|data| WebsocketServerResData::GetMessages(data));
+                .map(WebsocketServerResData::GetMessages)
+                .map(Box::new);
 
             to_request_response(req_res, request.id)
         }
@@ -601,7 +604,7 @@ async fn request_handler(
         WebsocketClientMessageData::ProfileUpdate(req_data) => {
             let req_res = crate::api::user::update(
                 ws_server.db.clone(),
-                &user,
+                user,
                 req_data,
                 redis_handle.clone(),
             )
@@ -610,7 +613,8 @@ async fn request_handler(
                 *user = res.clone();
 
                 WebsocketServerResData::ProfileUpdate(res)
-            });
+            })
+            .map(Box::new);
 
             to_request_response(req_res, request.id)
         }
@@ -618,7 +622,8 @@ async fn request_handler(
         WebsocketClientMessageData::GetSelf => {
             let req_res = crate::api::user::get_single(ws_server.db.clone(), &user.id)
                 .await
-                .map(|data| WebsocketServerResData::GetSelf(data));
+                .map(WebsocketServerResData::GetSelf)
+                .map(Box::new);
 
             to_request_response(req_res, request.id)
         }
@@ -638,7 +643,7 @@ async fn websocket(
 
     let mut user = get_single(ws_server.db.clone(), &user.user_id)
         .await
-        .map_err(|e| ErrorInternalServerError(e))?;
+        .map_err(ErrorInternalServerError)?;
 
     actix_web::rt::spawn(async move {
         let user_id = user.id;
@@ -670,8 +675,8 @@ async fn websocket(
                         transport
                             .connect(WebRtcTransportRemoteParameters { dtls_parameters })
                             .await
-                            .and_then(|_| {
-                                Ok(WebsocketServerResData::MS(
+                            .map(|_| {
+                                WebsocketServerResData::MS(Box::new(
                                     MediaSoupResponse::ConnectProducerTransport,
                                 ))
                             })
@@ -695,9 +700,9 @@ async fn websocket(
                             .producer_added(user_id.to_string(), conn.room_id.clone(), producer)
                             .await
                             .map(|_| {
-                                WebsocketServerResData::MS(MediaSoupResponse::Produce(
+                                WebsocketServerResData::MS(Box::new(MediaSoupResponse::Produce(
                                     id.to_string(),
-                                ))
+                                )))
                             })
                     }
                     ConnectConsumerTransport(dtls_parameters) => {
@@ -709,9 +714,9 @@ async fn websocket(
                             .connect(WebRtcTransportRemoteParameters { dtls_parameters })
                             .await
                             .map(|_| {
-                                WebsocketServerResData::MS(
+                                WebsocketServerResData::MS(Box::new(
                                     MediaSoupResponse::ConnectConsumerTransport,
-                                )
+                                ))
                             })
                             .map_err(|err| anyhow!(err))
                     }
@@ -734,12 +739,14 @@ async fn websocket(
 
                         conn.consumers.insert(id, consumer);
 
-                        Ok(WebsocketServerResData::MS(MediaSoupResponse::Consume {
-                            id: id.to_string(),
-                            producer_id,
-                            kind,
-                            rtp_parameters,
-                        }))
+                        Ok(WebsocketServerResData::MS(Box::new(
+                            MediaSoupResponse::Consume {
+                                id: id.to_string(),
+                                producer_id,
+                                kind,
+                                rtp_parameters,
+                            },
+                        )))
                     }
                     ConsumerResume(consumer_id) => {
                         let conn = participant_connection.as_ref().context("missing p conn")?;
@@ -755,9 +762,9 @@ async fn websocket(
                             .resume()
                             .await;
 
-                        Ok(WebsocketServerResData::MS(
+                        Ok(WebsocketServerResData::MS(Box::new(
                             MediaSoupResponse::ConsumerResume,
-                        ))
+                        )))
                     }
                     SetRoom(chat_id) => {
                         if let Some(conn) = participant_connection.as_ref() {
@@ -775,7 +782,7 @@ async fn websocket(
                         let consumer = &conn.transports.consumer;
                         let producer = &conn.transports.producer;
 
-                        let r = WebsocketServerResData::MS(MediaSoupResponse::SetRoom {
+                        let r = WebsocketServerResData::MS(Box::new(MediaSoupResponse::SetRoom {
                             room_id: chat_id.to_string(),
                             consumer_transport_options: TransportOptions {
                                 id: consumer.id().to_string(),
@@ -794,7 +801,7 @@ async fn websocket(
                                 .into_iter()
                                 .map(|(k, v)| (k, v.to_string()))
                                 .collect(),
-                        });
+                        }));
 
                         participant_connection.replace(conn);
 
@@ -807,8 +814,8 @@ async fn websocket(
 
                         let turn_creds = user::get_turn_creds().await?;
 
-                        Ok(WebsocketServerResData::MS(MediaSoupResponse::FinishInit(
-                            turn_creds,
+                        Ok(WebsocketServerResData::MS(Box::new(
+                            MediaSoupResponse::FinishInit(turn_creds),
                         )))
                     }
                     LeaveRoom => {
@@ -820,7 +827,9 @@ async fn websocket(
 
                         participant_connection = None;
 
-                        Ok(WebsocketServerResData::MS(MediaSoupResponse::LeaveRoom))
+                        Ok(WebsocketServerResData::MS(Box::new(
+                            MediaSoupResponse::LeaveRoom,
+                        )))
                     }
                 }
             };
@@ -854,7 +863,7 @@ async fn websocket(
                         ) {
                             match request.data {
                                 WebsocketClientMessageData::MS(media_soup) => {
-                                    let r = ms_handler(media_soup).await;
+                                    let r = ms_handler(media_soup).await.map(Box::new);
                                     if let Ok(string_payload) =
                                         serde_json::to_string(&to_request_response(r, request.id))
                                     {
