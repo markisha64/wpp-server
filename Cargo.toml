@@ -36,3 +36,7 @@ rustflags = ["-Z", "threads=8"]
 members = [
   "shared"
 ]
+
+[features]
+default = ["cloudflare"]
+cloudflare = []

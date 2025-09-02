@@ -9,6 +9,8 @@ use actix_web::{
 use anyhow::Context;
 use bcrypt::{hash, verify};
 use mongodb::bson::{doc, oid::ObjectId};
+
+#[cfg(feature = "cloudflare")]
 use serde::Serialize;
 
 use crate::{jwt::JwtSignService, mongodb::MongoDatabase, redis::RedisHandle};
@@ -169,11 +171,13 @@ pub async fn get_single(
     Ok(user.into())
 }
 
+#[cfg(feature = "cloudflare")]
 #[derive(Serialize)]
 struct CFRequest {
     ttl: i32,
 }
 
+#[cfg(feature = "cloudflare")]
 pub async fn get_turn_creds() -> anyhow::Result<String> {
     let client = reqwest::Client::new();
     let res = client
@@ -189,6 +193,11 @@ pub async fn get_turn_creds() -> anyhow::Result<String> {
         .await?;
 
     Ok(res)
+}
+
+#[cfg(not(feature = "cloudflare"))]
+pub async fn get_turn_creds() -> anyhow::Result<String> {
+    Ok(env::var("ICE_SERVERS")?)
 }
 
 pub fn config(cfg: &mut web::ServiceConfig) {

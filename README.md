@@ -8,7 +8,8 @@
 
 # Cloudflare
 
-The project relies on Cloudflare TURN Server, if you want to run it you should sign up and enable the service (1000GB/month free);
+By default this project relies on Cloudflare TURN Server. If you don't want to use Cloudflare TURN define the ICE_SERVERS env variable
+and compile with the flag `--no-default-feautres`.
 
 # Env
 
@@ -19,8 +20,13 @@ MONGODB_URL=
 SECRET_KEY=
 PORT= # http/ws port
 REDIS_URL=
+
+# Cloudflare
 CF_TOKEN=
 CF_ID=
+# no Cloudflare
+ICE_SERVERS={\"iceServers\":[{\"urls\":\"stun:stun.l.google.com:19302\"}]}
+
 # binding ip (use 0.0.0.0 inside Docker)
 HOST=127.0.0.1
 # announce ip
@@ -32,11 +38,19 @@ PORT_MAX=40100
 
 # Building
 
-`cargon run`
+`cargo run`
 
 or
 
 `cargo run --release`
+
+No Cloudflare TURN
+
+`cargo run --no-default-features`
+
+or
+
+`cargo run --release --no-default-features`
 
 # Docker
 
