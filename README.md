@@ -14,7 +14,7 @@ The project relies on Cloudflare TURN Server, if you want to run it you should s
 
 Create .env file
 
-```bash
+```shell
 MONGODB_URL=
 SECRET_KEY=
 PORT= # http/ws port
@@ -40,6 +40,7 @@ or
 
 # Docker
 
-`docker build -f Dockerfile -t wpp-server .`
-`docker run --env-file .env -d wpp-server`
-
+```shell
+docker build -f Dockerfile -t wpp-server .
+docker run --env-file .env -d wpp-server
+```
