@@ -149,7 +149,7 @@ pub async fn update(
     let message = WebsocketServerMessage::ProfileUpdated(user.clone());
 
     actix_web::rt::spawn(async move {
-        redis_handle.send_message_to_users(&user_ids, message).await;
+        let _ = redis_handle.send_message_to_users(&user_ids, message).await;
     });
 
     Ok(user)

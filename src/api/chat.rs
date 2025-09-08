@@ -188,7 +188,7 @@ pub async fn join(
     let user_ids = chat.users.iter().map(|x| x.id).collect();
 
     actix_web::rt::spawn(async move {
-        redis_handle
+        let _ = redis_handle
             .send_message_to_users(&user_ids, notif_payload)
             .await;
     });
@@ -286,7 +286,7 @@ pub async fn set_chat_read(
     let user_ids = vec![user.id];
 
     actix_web::rt::spawn(async move {
-        redis_handle
+        let _ = redis_handle
             .send_message_to_users(&user_ids, notif_payload)
             .await;
     });

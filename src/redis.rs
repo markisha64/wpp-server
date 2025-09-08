@@ -1,7 +1,7 @@
 use std::{env, pin::pin, time::Duration};
 
 use actix_web::{rt::signal, web};
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use futures_util::{
     future::{select, Either},
     StreamExt,
@@ -11,7 +11,10 @@ use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use shared::api::websocket::WebsocketServerMessage;
 use tokio::{
-    sync::mpsc::{self, unbounded_channel},
+    sync::{
+        mpsc::{self, unbounded_channel},
+        oneshot,
+    },
     time::sleep,
 };
 use tracing::{error, info, warn};
@@ -20,12 +23,23 @@ use crate::api::websocket::WebsocketSeverHandle;
 
 pub struct RedisHandler {
     ws_server: web::Data<WebsocketSeverHandle>,
-    msg_rx: mpsc::UnboundedReceiver<RedisSyncMessage>,
+    msg_rx: mpsc::UnboundedReceiver<Command>,
 }
 
 #[derive(Clone)]
 pub struct RedisHandle {
-    msg_tx: mpsc::UnboundedSender<RedisSyncMessage>,
+    msg_tx: mpsc::UnboundedSender<Command>,
+}
+
+enum Command {
+    Send {
+        send: RedisSyncMessage,
+        res_tx: oneshot::Sender<anyhow::Result<()>>,
+    },
+    RoomExists {
+        room_id: ObjectId,
+        res_tx: oneshot::Sender<anyhow::Result<bool>>,
+    },
 }
 
 impl RedisHandle {
@@ -33,11 +47,26 @@ impl RedisHandle {
         &self,
         user_ids: &Vec<ObjectId>,
         message: WebsocketServerMessage,
-    ) {
-        let _ = self.msg_tx.send(RedisSyncMessage {
-            user_ids: user_ids.clone(),
-            message,
-        });
+    ) -> anyhow::Result<()> {
+        let (res_tx, res_rx) = oneshot::channel();
+
+        self.msg_tx.send(Command::Send {
+            send: RedisSyncMessage {
+                user_ids: user_ids.clone(),
+                message,
+            },
+            res_tx,
+        })?;
+
+        res_rx.await?
+    }
+
+    pub async fn room_exists(&self, room_id: ObjectId) -> anyhow::Result<bool> {
+        let (res_tx, res_rx) = oneshot::channel();
+
+        self.msg_tx.send(Command::RoomExists { room_id, res_tx })?;
+
+        res_rx.await?
     }
 }
 
@@ -117,12 +146,39 @@ impl RedisHandler {
                     }
                 }
 
-                Either::Left((Some(msg), _)) => {
-                    if let Ok(payload) = serde_json::to_string(&msg) {
-                        let _ = con.publish::<_, _, String>("sync_messages", payload).await;
-                    }
-                }
+                Either::Left((Some(cmd), _)) => match cmd {
+                    Command::Send { send, res_tx } => {
+                        let task: Result<(), anyhow::Error> = async {
+                            let payload = serde_json::to_string(&send)?;
 
+                            con.publish::<_, _, String>("sync_messages", payload)
+                                .await
+                                .map(|_| ())
+                                .map_err(|x| anyhow!(x))
+                        }
+                        .await;
+
+                        let _ = res_tx.send(task);
+                    }
+
+                    Command::RoomExists { room_id, res_tx } => {
+                        let task: Result<bool, anyhow::Error> = async {
+                            let result: Vec<(String, i64)> = redis::cmd("PUBSUB")
+                                .arg("NUMSUB")
+                                .arg(room_id.to_string().as_str())
+                                .query_async(&mut con)
+                                .await?;
+
+                            result
+                                .get(0)
+                                .map(|(_, x)| *x > 0)
+                                .context("empty result set")
+                        }
+                        .await;
+
+                        let _ = res_tx.send(task);
+                    }
+                },
                 // msg_rx None, server died?
                 Either::Left((None, _)) => {
                     panic!("msg_rx None, server shutting down")
