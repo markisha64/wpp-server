@@ -36,9 +36,13 @@ enum Command {
         send: RedisSyncMessage,
         res_tx: oneshot::Sender<anyhow::Result<()>>,
     },
-    RoomExists {
+    SinkRoom {
         room_id: ObjectId,
         res_tx: oneshot::Sender<anyhow::Result<bool>>,
+    },
+    UnsinkRoom {
+        room_id: ObjectId,
+        res_tx: oneshot::Sender<anyhow::Result<()>>,
     },
 }
 
@@ -61,10 +65,18 @@ impl RedisHandle {
         res_rx.await?
     }
 
-    pub async fn room_exists(&self, room_id: ObjectId) -> anyhow::Result<bool> {
+    pub async fn sink_room(&self, room_id: ObjectId) -> anyhow::Result<bool> {
         let (res_tx, res_rx) = oneshot::channel();
 
-        self.msg_tx.send(Command::RoomExists { room_id, res_tx })?;
+        self.msg_tx.send(Command::SinkRoom { room_id, res_tx })?;
+
+        res_rx.await?
+    }
+
+    pub async fn unsink_room(&self, room_id: ObjectId) -> anyhow::Result<()> {
+        let (res_tx, res_rx) = oneshot::channel();
+
+        self.msg_tx.send(Command::UnsinkRoom { room_id, res_tx })?;
 
         res_rx.await?
     }
@@ -161,7 +173,7 @@ impl RedisHandler {
                         let _ = res_tx.send(task);
                     }
 
-                    Command::RoomExists { room_id, res_tx } => {
+                    Command::SinkRoom { room_id, res_tx } => {
                         let task: Result<bool, anyhow::Error> = async {
                             let result: Vec<(String, i64)> = redis::cmd("PUBSUB")
                                 .arg("NUMSUB")
@@ -169,14 +181,30 @@ impl RedisHandler {
                                 .query_async(&mut con)
                                 .await?;
 
-                            result
+                            let available = result
                                 .get(0)
                                 .map(|(_, x)| *x > 0)
-                                .context("empty result set")
+                                .context("empty result set")?;
+
+                            if !available {
+                                return Ok(false);
+                            }
+
+                            sink.subscribe(room_id.to_string()).await?;
+
+                            Ok(true)
                         }
                         .await;
 
                         let _ = res_tx.send(task);
+                    }
+
+                    Command::UnsinkRoom { room_id, res_tx } => {
+                        let _ = res_tx.send(
+                            sink.unsubscribe(room_id.to_string())
+                                .await
+                                .map_err(|x| anyhow!(x)),
+                        );
                     }
                 },
                 // msg_rx None, server died?
