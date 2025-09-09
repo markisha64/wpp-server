@@ -70,14 +70,18 @@ pub struct ParticipantConnection {
 
 pub struct Room {
     router: Router,
-    clients: HashMap<String, Vec<Producer>>,
+    clients: HashMap<String, ParticipantConnection>,
 }
 
 impl Room {
     fn producers(&self) -> Vec<(String, ProducerId)> {
         self.clients
             .iter()
-            .flat_map(|(user_id, producers)| producers.iter().map(|x| (user_id.clone(), x.id())))
+            .flat_map(|(user_id, conn)| {
+                conn.producers
+                    .iter()
+                    .map(|producer| (user_id.clone(), producer.id()))
+            })
             .collect()
     }
 }
@@ -103,13 +107,8 @@ enum Command {
     JoinRoom {
         user_id: String,
         room_id: String,
-        res_tx: oneshot::Sender<
-            anyhow::Result<(
-                ParticipantConnection,
-                RtpCapabilitiesFinalized,
-                Vec<(String, ProducerId)>,
-            )>,
-        >,
+        res_tx:
+            oneshot::Sender<anyhow::Result<(RtpCapabilitiesFinalized, Vec<(String, ProducerId)>)>>,
     },
 
     ProducerAdded {
@@ -202,11 +201,7 @@ impl WebsocketServer {
         &mut self,
         user_id: String,
         room_id: String,
-    ) -> anyhow::Result<(
-        ParticipantConnection,
-        RtpCapabilitiesFinalized,
-        Vec<(String, ProducerId)>,
-    )> {
+    ) -> anyhow::Result<(RtpCapabilitiesFinalized, Vec<(String, ProducerId)>)> {
         let entry = self.rooms.entry(room_id.clone());
 
         match entry {
@@ -281,7 +276,8 @@ impl WebsocketServer {
             .await
             .map_err(|error| anyhow!("Failed to create consumer transport: {error}"))?;
 
-        Ok((
+        room.clients.insert(
+            user_id.clone(),
             ParticipantConnection {
                 _user_id: user_id,
                 room_id,
@@ -293,9 +289,9 @@ impl WebsocketServer {
                     producer: producer_transport,
                 },
             },
-            room.router.rtp_capabilities().clone(),
-            room.producers(),
-        ))
+        );
+
+        Ok((room.router.rtp_capabilities().clone(), room.producers()))
     }
 
     pub fn producer_added(
@@ -306,10 +302,13 @@ impl WebsocketServer {
     ) -> anyhow::Result<()> {
         let room = self.rooms.get_mut(&room_id).context("missing room")?;
 
-        let producers = room.clients.entry(user_id.clone()).or_default();
+        let conn = room
+            .clients
+            .get_mut(&user_id)
+            .context("missing connection")?;
         let producer_id = producer.id();
 
-        producers.push(producer);
+        conn.producers.push(producer);
 
         for recipient in room.clients.keys() {
             if recipient != &user_id {
@@ -337,8 +336,8 @@ impl WebsocketServer {
         let producers = room.clients.remove(&user_id);
 
         // this is disgusting haha
-        if let Some(producers) = producers {
-            for producer in producers {
+        if let Some(conn) = producers {
+            for producer in conn.producers {
                 for receiver in room.clients.keys() {
                     if let Some(conns) = self.connections.get(receiver) {
                         for (_, connection) in conns {
@@ -474,11 +473,7 @@ impl WebsocketSeverHandle {
         &self,
         user_id: String,
         room_id: String,
-    ) -> (
-        ParticipantConnection,
-        RtpCapabilitiesFinalized,
-        Vec<(String, ProducerId)>,
-    ) {
+    ) -> (RtpCapabilitiesFinalized, Vec<(String, ProducerId)>) {
         let (res_tx, res_rx) = oneshot::channel();
 
         self.cmd_tx
@@ -768,7 +763,7 @@ async fn websocket(
                             }
                         }
 
-                        let (conn, router_rtp_capabilities, producers) = ws_server
+                        let (router_rtp_capabilities, producers) = ws_server
                             .join_room(user_id.to_string(), chat_id.to_string())
                             .await;
 
