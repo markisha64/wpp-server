@@ -123,6 +123,13 @@ enum Command {
         room_id: String,
         res_tx: oneshot::Sender<anyhow::Result<()>>,
     },
+
+    ConnectProducerTransport {
+        dtls_parameters: DtlsParameters,
+        user_id: String,
+        room_id: String,
+        res_tx: oneshot::Sender<anyhow::Result<()>>,
+    },
 }
 
 pub struct WebsocketServer {
@@ -354,6 +361,33 @@ impl WebsocketServer {
         Ok(())
     }
 
+    pub async fn connect_producer_transport(
+        &mut self,
+        user_id: String,
+        room_id: String,
+        dtls_parameters: DtlsParameters,
+    ) -> anyhow::Result<WebsocketServerResData> {
+        let conn = self
+            .rooms
+            .get_mut(&room_id)
+            .context("missing room")?
+            .clients
+            .get_mut(&user_id)
+            .context("missing connection")?;
+
+        let transport = conn.transports.producer.clone();
+
+        transport
+            .connect(WebRtcTransportRemoteParameters { dtls_parameters })
+            .await
+            .and_then(|_| {
+                Ok(WebsocketServerResData::MS(
+                    MediaSoupResponse::ConnectProducerTransport,
+                ))
+            })
+            .map_err(|err| anyhow!(err))
+    }
+
     pub async fn run(mut self) -> io::Result<()> {
         while let Some(cmd) = self.cmd_rx.recv().await {
             match cmd {
@@ -406,6 +440,8 @@ impl WebsocketServer {
                     let res = self.remove_participant(user_id, room_id).await;
                     let _ = res_tx.send(res);
                 }
+
+                Command::ConnectProducerTransport { dtls_parameters } => {}
             }
         }
 
