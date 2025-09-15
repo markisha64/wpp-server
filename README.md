@@ -1,19 +1,54 @@
 
 # WPP Server
 
-# Requirements for building from source
-- Rust 1.85^
-- g++ >= 8 or clang (with C++ 17 support)
-- cc and c++ symlinks pointing to gcc/g++ or clang/clang++
+WPPServer poslužiteljski je dio fullstack aplikacije za real-time komunikaciju
+pomoću WebSocketa (poruke i signalizacija) i WebRTC (video pozivi).
+Izgrađen je pomoću [Actix Web](https://actix.rs/) frameworka za izradu Rest API-ja.
+Server sluša na definiranom portu za HTTP requestove te na ruti /ws/ dopušta
+[UPGRADE](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Upgrade)
+na WebSocket konekciju. Serveru su također potrebni UDP portovi za
+[Mediasoup](https://mediasoup.org/) konekcije (audio/video). 
 
-# Cloudflare
+## Build Requirements
 
-By default this project relies on Cloudflare TURN Server. If you don't want to use Cloudflare TURN define the ICE_SERVERS env variable
-and compile with the flag `--no-default-feautres`.
+Prije no što možeš build-ati cijeli projekt, moraš instalirati neke alate.
+Treba ti [Rust](https://www.rust-lang.org/) (verzija 1.85 ili veća),
+[g++](https://gcc.gnu.org/) (verzija 8 ili veća) ili [clang](https://clang.llvm.org/)
+(sa podrškom za C++ 17) te cc i c++ moraju biti sym-linkani te pokazivati na gcc/g++ ili
+clang/clang++.
+
+## Run Requirements
+
+Poslužitelj ovisi o nekim drugim alatima.
+
+### Cloudflare
+
+Zbog jednostavnosti, pri developmentu poslužitelja, oslonio sam se na
+[Cloudflare TURN Server](https://developers.cloudflare.com/realtime/turn/).
+Ako ne želite ovisiti o Cloudflare-u, dovoljno je postaviti `ICE_SERVERS`
+env varijablu te compile-ati sa flag-om `--no-default-features`. Više informacija
+o [TURN-u](https://en.wikipedia.org/wiki/Traversal_Using_Relay_NAT)
+i [STUN-u](https://en.wikipedia.org/wiki/STUN). 
+
+### Redis
+
+Za potrebe sinkronizacija WebSocket konkecija između Actix radnika, koristimo
+[Redis](https://redis.io/). Redis je in-memory key-value baza podataka,
+najčešće korištena kao ditribuirani cache ili broker poruke. Poslužitelj koristi
+Redis-ov [Pub/Sub](https://redis.io/docs/latest/develop/pubsub/) mehanizam za
+dostavljanje poruka između raznih Actix radnika ili više instanci servera.
+Definiramo poslužitelju Redis pomoću `REDIS_URL` env varijable.
+
+### MongoDB
+
+Zbog jednostavnosti i brzine razvoja, odabran je [MongoDB](https://www.mongodb.com/)
+kao glavna baza podataka. MongoDB je dokument orijentirana baza podataka klasificirana
+kao NoSQL. Definiramo poslužitelju MongoDB pomoću `MONGODB_URL` env varijable.
 
 # Env
 
-Create .env file
+Za pokretanje poslužitalja potrebno nam je mnoštvo env varijabli. Možemo ih koristiti
+na standardni način ili definirati .env datoteku.
 
 ```shell
 MONGODB_URL=
@@ -38,21 +73,31 @@ PORT_MAX=40100
 
 # Building
 
-`cargo run`
+Osnovna komanda za pokretanje izvornog koda je
 
-or
+```shell
+cargo run
+```
 
-`cargo run --release`
+Ako želimo compile-ati sa svim optimizacijama koristimo flag `--release`
 
-No Cloudflare TURN
+```shell
+cargo run --release
+```
 
-`cargo run --no-default-features`
+Isto vrijedi za flag `--no-default-features`.
+Također možemo umjesto direktnog pokretanja samo buildati binary.
 
-or
+```shell
+cargo build --release
+```
 
-`cargo run --release --no-default-features`
+Novo izgraženi binary nalazi se u ./target/<debug|release>/wpp-server(.exe)
 
 # Docker
+
+Za standardiziranije pokretanje (npr. ako želimo koristiti neki VPS ili Google Cloud run)
+možemo koristiti [Docker](https://www.docker.com/).
 
 ```shell
 docker build -f Dockerfile -t wpp-server .
