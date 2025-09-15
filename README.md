@@ -2,7 +2,8 @@
 # WPP Server
 
 WPPServer poslužiteljski je dio fullstack aplikacije za real-time komunikaciju
-pomoću WebSocketa (poruke i signalizacija) i WebRTC (video pozivi).
+pomoću [WebSocketa](https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API)
+(poruke i signalizacija) i [WebRTC](https://webrtc.org/) (video pozivi).
 Izgrađen je pomoću [Actix Web](https://actix.rs/) frameworka za izradu Rest API-ja.
 Server sluša na definiranom portu za HTTP requestove te na ruti /ws/ dopušta
 [UPGRADE](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Upgrade)
