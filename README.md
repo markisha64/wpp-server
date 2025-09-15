@@ -92,7 +92,7 @@ Također možemo umjesto direktnog pokretanja samo buildati binary.
 cargo build --release
 ```
 
-Novo izgraženi binary nalazi se u ./target/<debug|release>/wpp-server(.exe)
+Novo izgraženi binary nalazi se u `./target/<debug|release>/wpp-server(.exe)`
 
 # Docker
 
